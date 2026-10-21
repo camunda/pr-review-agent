@@ -1,0 +1,438 @@
+name: pr-review-agent
+
+# Reusable AI pull-request review. Call it from a `pull_request` workflow in
+# your repository — see examples/caller-workflow.yml and docs/configuration.md.
+#
+# Security model (docs/security-model.md):
+#   - Everything that decides HOW a PR is judged — this workflow, the scripts,
+#     the prompt, the team config and (by default) the rubric — lives in
+#     pr-review-agent and is checked out (once, in the `config` job) at the
+#     exact commit of this workflow
+#     (`job.workflow_sha`). A PR in the reviewed repo cannot modify any of it.
+#   - Review skills / a rubric that live in the reviewed repo are read from the
+#     PR's BASE commit, never its head.
+#   - The agent runs in a READ-ONLY job. All write privileges live in `decide`,
+#     which runs no AI and re-derives the hard escalation rules deterministically.
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        description: >-
+          Name of the team config in the calling repository, i.e.
+          .github/pr-review-agent/<config>.yml, read from its default branch.
+        required: true
+        type: string
+      force_shadow_mode:
+        description: >-
+          Force shadow mode (comment only, never approve) regardless of the
+          config. Can only make the review safer, never less safe.
+        required: false
+        type: boolean
+        default: false
+      runs_on:
+        description: Runner label for all jobs.
+        required: false
+        type: string
+        default: ubuntu-slim
+      agent_repo_token_vault_secret:
+        description: >-
+          Optional Vault secret "<path> <field>" holding a token with
+          contents:read on pr-review-agent, used to check out this repository
+          when the caller's GITHUB_TOKEN cannot read it. Leave empty to use
+          GITHUB_TOKEN. Only the `config` job (no AI, no PR code) imports it;
+          the agent and decide jobs receive pr-review-agent as an artifact.
+        required: false
+        type: string
+        default: ""
+    secrets:
+      VAULT_ADDR:
+        required: true
+      VAULT_ROLE_ID:
+        required: true
+      VAULT_SECRET_ID:
+        required: true
+    outputs:
+      verdict:
+        description: AUTO_APPROVE or NEEDS_HUMAN (empty when the PR was not reviewed).
+        value: ${{ jobs.decide.outputs.verdict }}
+      escalation_type:
+        description: NONE, POLICY, FINDINGS or BOTH (empty when the PR was not reviewed).
+        value: ${{ jobs.decide.outputs.escalation_type }}
+      selected:
+        description: '"true" when the event passed the trigger filter (see `reviewed`).'
+        value: ${{ jobs.config.outputs.run }}
+      reviewed:
+        description: '"true" only when the agent produced and uploaded a verdict.'
+        value: ${{ jobs.review.outputs.reviewed }}
+
+# Enforced here too (not only in the caller): a superseded run must not go on to
+# post or approve. The approve step additionally refuses to approve any commit
+# other than the one reviewed.
+concurrency:
+  group: pr-review-agent-${{ github.repository }}-${{ inputs.config }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 0 — resolve the team config and decide whether to review at all. Never
+  # touches PR code and holds no secrets beyond the optional checkout token.
+  # ---------------------------------------------------------------------------
+  config:
+    name: Resolve config
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.should.outputs.run }}
+      shadow_mode: ${{ (inputs.force_shadow_mode || steps.cfg.outputs.shadow_mode == 'true') && 'true' || 'false' }}
+      timeout_minutes: ${{ steps.cfg.outputs.timeout_minutes }}
+      vault_anthropic_secret: ${{ steps.cfg.outputs.vault_anthropic_secret }}
+      model: ${{ steps.cfg.outputs.model }}
+      dedup_model: ${{ steps.cfg.outputs.dedup_model }}
+      allowed_bots: ${{ steps.cfg.outputs.allowed_bots }}
+      opt_in_label: ${{ steps.cfg.outputs.opt_in_label }}
+      needs_human_label: ${{ steps.cfg.outputs.needs_human_label }}
+      capture_alert_mentions: ${{ steps.cfg.outputs.capture_alert_mentions }}
+      rubric_ref: ${{ steps.cfg.outputs.rubric_ref }}
+    steps:
+      - name: Import agent checkout token
+        id: token
+        if: inputs.agent_repo_token_vault_secret != ''
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          method: approle
+          roleId: ${{ secrets.VAULT_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_SECRET_ID }}
+          exportEnv: false
+          secrets: ${{ inputs.agent_repo_token_vault_secret }} | AGENT_REPO_TOKEN ;
+
+      - name: Check out pr-review-agent (this workflow's own commit)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .pr-review-agent
+          token: ${{ steps.token.outputs.AGENT_REPO_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Load and validate team config
+        id: cfg
+        env:
+          CONFIG_NAME: ${{ inputs.config }}
+          AGENT_DIR: .pr-review-agent
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash .pr-review-agent/scripts/load-config.sh
+
+      - name: Decide whether to review this event
+        id: should
+        if: steps.cfg.outputs.found == 'true'
+        env:
+          CONFIG_FILE: ${{ steps.cfg.outputs.config_file }}
+        run: bash .pr-review-agent/scripts/should-review.sh
+
+      # The only place pr-review-agent is checked out (and the only job that may
+      # hold the checkout token). Later jobs download this bundle: artifacts
+      # are immutable once uploaded, so nothing in the agent job can replace it,
+      # and the agent job never holds a GitHub token beyond its read-only one.
+      - name: Bundle pr-review-agent for later jobs
+        if: steps.should.outputs.run == 'true'
+        env:
+          CONFIG_FILE: ${{ steps.cfg.outputs.config_file }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/pr-review-agent-bundle"
+          cp -R .pr-review-agent/scripts .pr-review-agent/prompts "${RUNNER_TEMP}/pr-review-agent-bundle/"
+          cp "$CONFIG_FILE" "${RUNNER_TEMP}/pr-review-agent-bundle/config.json"
+
+      - name: Upload pr-review-agent bundle
+        if: steps.should.outputs.run == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pr-review-agent-bundle
+          path: ${{ runner.temp }}/pr-review-agent-bundle
+          if-no-files-found: error
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # Job 1 — the agent. RUNS READ-ONLY. It can read the PR and write a verdict
+  # file, but holds no write-capable token and cannot approve, comment, or push.
+  # ---------------------------------------------------------------------------
+  review:
+    name: AI review (read-only)
+    needs: config
+    if: needs.config.outputs.run == 'true'
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ fromJSON(needs.config.outputs.timeout_minutes) }}
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      session_captured: ${{ steps.session_check.outputs.captured }}
+      reviewed: ${{ steps.reviewed.outputs.reviewed }}
+    env:
+      SHADOW_MODE: ${{ needs.config.outputs.shadow_mode }}
+    steps:
+      - name: Resolve session transcript path
+        run: echo "SESSION_MASKED_FILE=${RUNNER_TEMP}/ai-review-session-masked.json" >> "$GITHUB_ENV"
+
+      - name: Import secrets
+        id: secrets
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          method: approle
+          roleId: ${{ secrets.VAULT_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_SECRET_ID }}
+          exportEnv: false
+          # Only the Anthropic key. The agent deliberately gets NO GitHub PAT —
+          # it uses the job's read-only GITHUB_TOKEN to read the PR.
+          secrets: ${{ needs.config.outputs.vault_anthropic_secret }}
+
+      # Reviewed repo first: its checkout cleans the workspace root.
+      - name: Check out the reviewed repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Download pr-review-agent bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pr-review-agent-bundle
+          path: .pr-review-agent
+
+      # Rubric + skills into .policy/, from pr-review-agent or the PR BASE
+      # commit — never the PR head.
+      - name: Load review policy (immune to PR edits)
+        env:
+          CONFIG_FILE: .pr-review-agent/config.json
+          AGENT_DIR: .pr-review-agent
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bash .pr-review-agent/scripts/load-policy.sh
+
+      - name: Prepare verdict output directory
+        run: mkdir -p ai-review
+
+      - name: Render review prompt
+        id: prompt
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          CONFIG_FILE: .pr-review-agent/config.json
+          AGENT_DIR: .pr-review-agent
+        run: bash .pr-review-agent/scripts/render-prompt.sh
+
+      # anthropics/claude-code-action is a third-party action — the official
+      # action for running Claude Code agents in CI. Pinned to a commit SHA.
+      - name: Run Claude review agent (read-only, produces a verdict file)
+        id: claude
+        uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
+        with:
+          anthropic_api_key: ${{ steps.secrets.outputs.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: ${{ steps.prompt.outputs.text }}
+          # Named bots only (never `*`): lets e.g. a PR opened by Claude itself
+          # be reviewed on its `opened` event.
+          allowed_bots: ${{ needs.config.outputs.allowed_bots }}
+          # Bash is limited to gh/git to keep the agent on task. This is NOT a
+          # sandbox (git/gh aliases can run commands): the safety of the design
+          # rests on the read-only token here and on `decide` treating everything
+          # produced on this runner as untrusted (docs/security-model.md).
+          claude_args: >-
+            --allowedTools "Bash(gh:*),Bash(git:*),Read,Grep,Glob,Write"${{ needs.config.outputs.model != '' && format(' --model {0}', needs.config.outputs.model) || '' }}
+
+      # The agent had Write and Bash(git:*), so files it could reach are not
+      # trusted after this point. Later steps that hold the Anthropic key run
+      # scripts from a FRESH download of the immutable bundle, never from
+      # .pr-review-agent or the PR checkout. This stops file
+      # tampering via Write; it does not undo a full runner compromise (see
+      # docs/security-model.md), which is why their outputs stay untrusted.
+      - name: Clear the trusted tooling path
+        if: always()
+        run: rm -rf .trusted-agent
+
+      - name: Download pr-review-agent bundle (trusted, post-agent)
+        if: always()
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pr-review-agent-bundle
+          path: .trusted-agent
+
+      # LLM dedup pass. Runs here, in the read-only job that holds the key, so
+      # the AI stays out of the privileged job. Fail-open and continue-on-error:
+      # a dedup problem never drops a finding and never fails the review.
+      - name: Deduplicate findings against prior review rounds (LLM filter pass)
+        if: success() && hashFiles('ai-review/verdict.json') != ''
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ steps.secrets.outputs.ANTHROPIC_API_KEY }}
+          ANTHROPIC_DEDUP_MODEL: ${{ needs.config.outputs.dedup_model }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          # Drop any dedup.json the Write-capable agent may have planted, so a
+          # failure before the trusted script writes its own result fails open.
+          rm -f ai-review/dedup.json
+          bash .trusted-agent/scripts/ai-review-dedup-findings.sh
+
+      - name: Verify the agent produced a verdict
+        run: test -f ai-review/verdict.json
+
+      - name: Upload verdict artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ai-review-verdict
+          path: |
+            ai-review/verdict.json
+            ai-review/dedup.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Mark reviewed
+        id: reviewed
+        run: echo "reviewed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Mask secrets from session transcript
+        if: always()
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          MASKED_FILE: ${{ env.SESSION_MASKED_FILE }}
+          # Passed via env (read from %ENV), never on argv.
+          ANTHROPIC_API_KEY: ${{ steps.secrets.outputs.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash .trusted-agent/scripts/ai-review-mask-session.sh
+
+      - name: Upload review session transcript (masked)
+        id: session_upload
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ai-review-session
+          path: ${{ env.SESSION_MASKED_FILE }}
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Record whether the session transcript was captured
+        id: session_check
+        if: always()
+        env:
+          ARTIFACT_ID: ${{ steps.session_upload.outputs.artifact-id }}
+        run: |
+          out="${SESSION_MASKED_FILE}"
+          if [ -n "${ARTIFACT_ID:-}" ] && [ -f "$out" ] && [ -s "$out" ]; then
+            echo "captured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "captured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::AI review session transcript not captured (artifact-id='${ARTIFACT_ID:-}')"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Job 2 — the gate + action. Holds the ONLY write token. Runs NO AI and has no
+  # Anthropic key. Never checks out the reviewed repository: every script comes
+  # from the pr-review-agent bundle (this workflow's commit), and `gh` targets the PR via
+  # GH_REPO.
+  # ---------------------------------------------------------------------------
+  decide:
+    name: Apply verdict (deterministic gate)
+    needs: [config, review]
+    if: always() && needs.review.result == 'success'
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: write
+      # `gh pr checks --required` in the live-mode approval gate.
+      checks: read
+      statuses: read
+    outputs:
+      verdict: ${{ steps.final.outputs.verdict }}
+      escalation_type: ${{ steps.final.outputs.escalation_type }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      SHADOW_MODE: ${{ needs.config.outputs.shadow_mode }}
+    steps:
+      - name: Download pr-review-agent bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pr-review-agent-bundle
+          path: .pr-review-agent
+
+      - name: Download verdict artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ai-review-verdict
+          path: ai-review
+
+      # The agent's verdict can only ever be DOWNGRADED to NEEDS_HUMAN here.
+      - name: Deterministic escalation gate
+        id: gate
+        env:
+          CONFIG_FILE: .pr-review-agent/config.json
+        run: bash .pr-review-agent/scripts/gate.sh
+
+      - name: Compute final verdict and body
+        id: final
+        env:
+          GATE_ESCALATE: ${{ steps.gate.outputs.escalate }}
+          GATE_REASON: ${{ steps.gate.outputs.reason }}
+          GATE_MATCH: ${{ steps.gate.outputs.match }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUBRIC_REF: ${{ needs.config.outputs.rubric_ref }}
+        run: bash .pr-review-agent/scripts/ai-review-compute-verdict.sh
+
+      - name: Post review (shadow mode, or any NEEDS_HUMAN)
+        if: env.SHADOW_MODE == 'true' || steps.final.outputs.verdict == 'NEEDS_HUMAN'
+        env:
+          VERDICT: ${{ steps.final.outputs.verdict }}
+          OPT_IN_LABEL: ${{ needs.config.outputs.opt_in_label }}
+          NEEDS_HUMAN_LABEL: ${{ needs.config.outputs.needs_human_label }}
+          AI_REVIEW_LABEL_PRESENT: ${{ contains(github.event.pull_request.labels.*.name, needs.config.outputs.opt_in_label) }}
+        run: bash .pr-review-agent/scripts/ai-review-post-summary.sh
+
+      # Live mode only, explicit AUTO_APPROVE only, never on drafts (the script
+      # re-reads the current draft state too).
+      - name: Approve (live mode only, AUTO_APPROVE only, never on drafts)
+        if: env.SHADOW_MODE == 'false' && steps.final.outputs.verdict == 'AUTO_APPROVE' && github.event.pull_request.draft == false
+        env:
+          # Approval is anchored to this commit and skipped if the PR moved on.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash .pr-review-agent/scripts/ai-review-approve.sh
+
+      # Only job with pull-requests: write, so the transcript-capture alert lives
+      # here. Fail closed: anything but a confirmed capture posts an alert;
+      # a confirmed capture deletes stale alerts.
+      - name: Notify on session transcript capture status
+        if: always()
+        continue-on-error: true
+        env:
+          CAPTURED: ${{ needs.review.outputs.session_captured }}
+          MENTIONS: ${{ needs.config.outputs.capture_alert_mentions }}
+        run: |
+          set -uo pipefail
+          marker='<!-- ai-review-session-capture -->'
+          existing="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\") | select(.body | contains(\"${marker}\")) | .id")"
+          keep=""
+          if [ "${CAPTURED:-}" != "true" ]; then
+            cc=""
+            [ -n "${MENTIONS:-}" ] && cc=" cc ${MENTIONS}"
+            body="⚠️ The AI review **session transcript was not captured** for the latest run — the \`ai-review-session\` artifact is missing or empty. This is most likely a \`claude-code-action\` output change (or a failed mask/upload); the review itself was unaffected.${cc}
+
+          ${marker}"
+            keep="$(gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" -f body="$body" --jq '.id' || true)"
+            if [ -z "$keep" ]; then
+              echo "::warning::Failed to post capture-break alert; leaving existing alerts intact"
+              exit 0
+            fi
+          fi
+          for id in $existing; do
+            [ "$id" = "$keep" ] && continue
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/issues/comments/${id}" || true
+          done

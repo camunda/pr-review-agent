@@ -1,0 +1,12 @@
+{
+  "name": "pr-review-agent",
+  "private": true,
+  "description": "Reusable AI pull-request review workflow for Camunda repositories",
+  "scripts": {
+    "test": "node --test scripts/__tests__/*.test.js",
+    "lint": "shellcheck -S warning scripts/*.sh && actionlint -ignore 'property \"workflow_(repository|sha)\" is not defined' .github/workflows/*.yml examples/*.yml"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

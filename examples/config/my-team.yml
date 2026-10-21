@@ -1,0 +1,45 @@
+# Copy to .github/pr-review-agent/<name>.yml in your repository and merge it to
+# the default branch. <name> is what you pass as `config:` in the caller workflow.
+# All keys: docs/configuration.md. This file is validated by this repo's tests.
+schema_version: 1
+
+# Comment only, never approve. Keep it on until the rubric is calibrated and
+# the InfoSec exception is filed (docs/security-model.md).
+shadow_mode: true
+
+vault:
+  anthropic_api_key:
+    # Ask your team's Vault admin for a path your AppRole can read.
+    path: secret/data/products/my-team/ci/common
+
+triggers:
+  # Add this label to a PR (also a draft) to request a review on demand.
+  opt_in_label: ai-review
+  skip_authors:
+    - renovate[bot]
+    - dependabot[bot]
+
+policy:
+  # Repo conventions the agent applies, read from the PR base commit.
+  # A missing skill only causes a warning.
+  skills:
+    - path: .agents/skills/review/SKILL.md
+  instructions: |
+    - Java tests live under src/test/ in the same Maven module.
+    - Frontend tests are co-located `*.test.tsx` files.
+
+escalation:
+  # Changed paths that always need a human, whatever the agent says.
+  # `*` also matches `/`. The caller workflow and this config are covered
+  # by built-in rules.
+  rules:
+    - reason: db migration
+      paths: ["*/db/migration/*"]
+    - reason: security-sensitive
+      paths: ["*/auth/*", "*/security/*"]
+    - reason: build config
+      paths: ["pom.xml", "*/pom.xml", "package.json", "*/package.json"]
+
+notifications:
+  # Tagged when the agent's session transcript could not be captured.
+  capture_alert_mentions: ["@camunda/my-team"]

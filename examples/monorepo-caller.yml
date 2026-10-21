@@ -1,0 +1,46 @@
+# One team's caller in a repository shared by several teams.
+# Copy to .github/workflows/ai-pr-review-<team>.yml, one file per team.
+#
+# Example layout: team "frontend" owns web/, except web/src/billing/, which
+# team "billing" owns. Each team has:
+#   .github/pr-review-agent/<team>.yml          its config (see examples/config/)
+#   .github/workflows/ai-pr-review-<team>.yml   its caller (this file)
+# and owns both files in CODEOWNERS:
+#   /.github/pr-review-agent/frontend.yml          @camunda/frontend
+#   /.github/workflows/ai-pr-review-frontend.yml   @camunda/frontend
+#
+# A PR that touches code of both teams gets one review per team. Each review
+# covers the whole PR; its team's escalation rules decide what needs a human.
+name: ai-pr-review-frontend
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    # Only PRs that touch this team's code. Later patterns win, so `!`
+    # excludes the part another team owns. (`paths` and `paths-ignore` cannot
+    # be combined for one event.)
+    paths:
+      - "web/**"
+      - "!web/src/billing/**"
+
+# github.workflow differs per team, so the teams' runs never cancel each other.
+concurrency:
+  group: ai-pr-review-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  review:
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: read
+      statuses: read
+    uses: camunda/pr-review-agent/.github/workflows/pr-review.yml@v1
+    with:
+      config: frontend
+    secrets:
+      VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+      VAULT_ROLE_ID: ${{ secrets.VAULT_ROLE_ID }}
+      VAULT_SECRET_ID: ${{ secrets.VAULT_SECRET_ID }}

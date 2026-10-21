@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Script tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run tests
+        run: node --test scripts/__tests__/*.test.js
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: shellcheck
+        run: shellcheck -S warning scripts/*.sh
+      # job.workflow_repository / job.workflow_sha are documented GitHub context
+      # properties that actionlint 1.7.12 does not know yet (fixed upstream, not
+      # released). Ignore exactly that message; drop the -ignore once released.
+      - name: actionlint
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color \
+            -ignore 'property "workflow_(repository|sha)" is not defined' \
+            .github/workflows/*.yml examples/*.yml

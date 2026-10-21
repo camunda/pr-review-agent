@@ -1,0 +1,43 @@
+# Copy to .github/workflows/ai-pr-review.yml in your repository.
+#
+# 1. Add your team config to this repository at .github/pr-review-agent/<name>.yml
+#    (start from examples/config/my-team.yml). It is read from the default
+#    branch, so reviews start once it is merged.
+# 2. Set `config:` below to <name>. Several teams in one repository each add
+#    their own config and caller workflow, limited with `paths:`.
+# 3. Pin `uses:` to a release tag or commit SHA of pr-review-agent.
+# 4. Keep this check NON-required in branch protection: in live mode the approve
+#    step waits for required checks, and would wait on itself forever.
+name: ai-pr-review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    # paths: ["my-team-dir/**"]   # only PRs that touch your team's code
+
+# Cancel a stale review when a new push arrives on the same PR. github.workflow
+# keeps callers of different teams in one repository from cancelling each other.
+concurrency:
+  group: ai-pr-review-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  review:
+    # The called workflow's jobs can only narrow these, never widen them.
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: read
+      statuses: read
+    uses: camunda/pr-review-agent/.github/workflows/pr-review.yml@v1
+    with:
+      config: my-team-repo
+      # force_shadow_mode: true   # comment-only even if the config says live
+      # runs_on: ubuntu-latest
+      # agent_repo_token_vault_secret: "secret/data/products/<team>/ci/github PR_REVIEW_AGENT_READ_TOKEN"
+    secrets:
+      VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+      VAULT_ROLE_ID: ${{ secrets.VAULT_ROLE_ID }}
+      VAULT_SECRET_ID: ${{ secrets.VAULT_SECRET_ID }}
