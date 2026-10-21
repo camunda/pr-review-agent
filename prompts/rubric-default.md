@@ -1,8 +1,8 @@
 # Default PR Review Rubric
 
 This is the default rubric used when a team config does not set `policy.rubric`. It is
-deliberately conservative: copy it to `config/<team>/rubric.md`, tailor it, and point
-`policy.rubric` at your copy.
+deliberately conservative: copy it to `.github/pr-review-agent/<name>-rubric.md` in your
+repository, tailor it, and point `policy.rubric` at your copy with `from: repo`.
 
 > **Trust boundary.** The rubric is loaded from `pr-review-agent` (or, when a team opts
 > for `from: repo`, from the PR's **base** commit), never from the PR head, so a PR cannot
