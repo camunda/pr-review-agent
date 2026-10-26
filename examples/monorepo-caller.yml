@@ -24,14 +24,21 @@ on:
       - "!web/src/billing/**"
 
 # github.workflow differs per team, so the teams' runs never cancel each other.
+# A `labeled` event for any label other than the team's opt_in_label
+# (`ai-review` here) gets its own group and skips the review job, so it never
+# cancels a review that is still running. Keep the label name in sync.
 concurrency:
-  group: ai-pr-review-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: >-
+    ${{ github.event.action == 'labeled' && github.event.label.name != 'ai-review'
+        && format('ai-pr-review-ignored-{0}', github.run_id)
+        || format('ai-pr-review-{0}-{1}', github.workflow, github.event.pull_request.number) }}
   cancel-in-progress: true
 
 permissions: {}
 
 jobs:
   review:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ai-review'
     permissions:
       contents: read
       pull-requests: write

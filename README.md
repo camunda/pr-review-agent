@@ -20,11 +20,16 @@ summary. When the team enables live mode, that job can also approve the PR.
      pull_request:
        types: [opened, synchronize, reopened, ready_for_review, labeled]
    concurrency:
-     group: ai-pr-review-${{ github.workflow }}-${{ github.event.pull_request.number }}
+     # Other labels get their own group, so they never cancel a running review.
+     group: >-
+       ${{ github.event.action == 'labeled' && github.event.label.name != 'ai-review'
+           && format('ai-pr-review-ignored-{0}', github.run_id)
+           || format('ai-pr-review-{0}-{1}', github.workflow, github.event.pull_request.number) }}
      cancel-in-progress: true
    permissions: {}
    jobs:
      review:
+       if: github.event.action != 'labeled' || github.event.label.name == 'ai-review'
        permissions: { contents: read, pull-requests: write, checks: read, statuses: read }
        uses: camunda/pr-review-agent/.github/workflows/pr-review.yml@v1
        with:

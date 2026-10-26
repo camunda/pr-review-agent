@@ -163,6 +163,12 @@ The calling job must grant `contents: read`, `pull-requests: write`, `checks: re
 Keep the calling check **non-required**. In live mode, the approval step waits for
 required checks, so it would wait for itself.
 
+Copy the caller's `concurrency` group and the `review` job's `if:` from the examples.
+Without them, adding any other label to a PR starts a run that cancels a review in
+progress, and the new run is skipped (only `triggers.opt_in_label` requests a review),
+so that commit is never reviewed. The label name in the caller must match
+`triggers.opt_in_label`.
+
 ## Versioning
 
 Pin `uses:` to a release tag (`@v1`) or a full commit SHA. Scripts and prompt are
