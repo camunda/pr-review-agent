@@ -18,6 +18,10 @@ triggers:
   skip_authors:
     - renovate[bot]
     - dependabot[bot]
+  # Optional: stop automatic reviews once a PR has this many agent reviews (a
+  # fix-and-push loop can otherwise review every push). Re-adding the label above
+  # still requests one. Unset = no limit.
+  # max_auto_reviews: 5
 
 policy:
   # Repo conventions the agent applies, read from the PR base commit.

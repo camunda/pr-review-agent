@@ -86,8 +86,13 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      # Counts earlier agent reviews for triggers.max_auto_reviews.
+      pull-requests: read
     outputs:
       run: ${{ steps.should.outputs.run }}
+      cap_reached: ${{ steps.should.outputs.cap_reached }}
+      review_count: ${{ steps.should.outputs.review_count }}
+      max_auto_reviews: ${{ steps.cfg.outputs.max_auto_reviews }}
       shadow_mode: ${{ (inputs.force_shadow_mode || steps.cfg.outputs.shadow_mode == 'true') && 'true' || 'false' }}
       timeout_minutes: ${{ steps.cfg.outputs.timeout_minutes }}
       vault_anthropic_secret: ${{ steps.cfg.outputs.vault_anthropic_secret }}
@@ -134,6 +139,7 @@ jobs:
         if: steps.cfg.outputs.found == 'true'
         env:
           CONFIG_FILE: ${{ steps.cfg.outputs.config_file }}
+          GH_TOKEN: ${{ github.token }}
         run: bash .pr-review-agent/scripts/should-review.sh
 
       # The only place pr-review-agent is checked out (and the only job that may
@@ -141,7 +147,7 @@ jobs:
       # are immutable once uploaded, so nothing in the agent job can replace it,
       # and the agent job never holds a GitHub token beyond its read-only one.
       - name: Bundle pr-review-agent for later jobs
-        if: steps.should.outputs.run == 'true'
+        if: steps.should.outputs.run == 'true' || steps.should.outputs.cap_reached == 'true'
         env:
           CONFIG_FILE: ${{ steps.cfg.outputs.config_file }}
         run: |
@@ -150,13 +156,44 @@ jobs:
           cp "$CONFIG_FILE" "${RUNNER_TEMP}/pr-review-agent-bundle/config.json"
 
       - name: Upload pr-review-agent bundle
-        if: steps.should.outputs.run == 'true'
+        if: steps.should.outputs.run == 'true' || steps.should.outputs.cap_reached == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pr-review-agent-bundle
           path: ${{ runner.temp }}/pr-review-agent-bundle
           if-no-files-found: error
           retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # Job 0b — tells the PR why an automatic review did not run when it reached
+  # triggers.max_auto_reviews. Runs no AI and no PR code; its scripts come from
+  # the bundle. Best effort: a failure here never fails the run.
+  # ---------------------------------------------------------------------------
+  cap-notice:
+    name: Review cap notice
+    needs: config
+    if: needs.config.outputs.cap_reached == 'true'
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Download pr-review-agent bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pr-review-agent-bundle
+          path: .pr-review-agent
+
+      - name: Post the review-cap notice (once per PR)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          OPT_IN_LABEL: ${{ needs.config.outputs.opt_in_label }}
+          REVIEW_COUNT: ${{ needs.config.outputs.review_count }}
+          MAX_AUTO_REVIEWS: ${{ needs.config.outputs.max_auto_reviews }}
+        run: bash .pr-review-agent/scripts/post-cap-notice.sh
 
   # ---------------------------------------------------------------------------
   # Job 1 — the agent. RUNS READ-ONLY. It can read the PR and write a verdict
