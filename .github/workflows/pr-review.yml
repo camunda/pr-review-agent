@@ -167,7 +167,11 @@ jobs:
   # ---------------------------------------------------------------------------
   # Job 0b — tells the PR why an automatic review did not run when it reached
   # triggers.max_auto_reviews. Runs no AI and no PR code; its scripts come from
-  # the bundle. Best effort: a failure here never fails the run.
+  # the bundle. Best effort: continue-on-error on the whole job means a failure
+  # anywhere in it (bundle download included) never fails the calling workflow.
+  # The concurrency group is shared by every config of the repository (the
+  # workflow-level group is per config), so two configs cannot both post a
+  # notice for the same PR; queued runs wait instead of being cancelled.
   # ---------------------------------------------------------------------------
   cap-notice:
     name: Review cap notice
@@ -175,6 +179,10 @@ jobs:
     if: needs.config.outputs.cap_reached == 'true'
     runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 5
+    continue-on-error: true
+    concurrency:
+      group: pr-review-agent-cap-notice-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     permissions:
       contents: read
       pull-requests: write
@@ -186,7 +194,6 @@ jobs:
           path: .pr-review-agent
 
       - name: Post the review-cap notice (once per PR)
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
