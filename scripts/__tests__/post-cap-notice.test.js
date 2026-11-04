@@ -40,6 +40,7 @@ test('posts one comment naming the label, with the hidden marker', () => {
   assert.ok(posts[0].includes(MARKER));
   assert.ok(posts[0].includes('`needs ai`'));
   assert.match(posts[0], /3 AI review\(s\)/);
+  assert.match(posts[0], /remove \(if present\) and re-add the `needs ai` label/);
 });
 
 test('does not repeat the notice when one is already on the PR', () => {
