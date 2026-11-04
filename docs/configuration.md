@@ -76,6 +76,7 @@ triggers:
   skip_authors:                        # PR authors that are never reviewed
     - renovate[bot]
     - dependabot[bot]
+  max_auto_reviews: 0                  # whole number >= 1 caps automatic reviews per PR; 0 or unset = no limit
 
 labels:
   needs_human: ""                      # label added on NEEDS_HUMAN in live mode; "" = none
@@ -104,6 +105,38 @@ notifications:
   # Tagged when the agent's session transcript was not captured.
   capture_alert_mentions: ["@my-user", "@camunda/my-team"]
 ```
+
+### Capping automatic reviews
+
+A review runs on every push, so a coding agent that fixes each finding and pushes again
+can keep a PR in a review and fix loop. Set `triggers.max_auto_reviews` to stop that.
+Once a PR has that many agent reviews, further automatic runs are skipped and the PR
+gets one comment saying why and how to request a review by hand.
+
+- The count is every earlier agent review on the PR, whether it ran automatically or was
+  requested with the label. It is read from the `<!-- ai-review verdict=... -->` marker
+  on reviews posted by `github-actions[bot]`.
+- Remove (if present) and re-add `triggers.opt_in_label` to request a review past the cap.
+  A `labeled` event for that label is never capped.
+- Re-running a workflow from the Actions tab is never capped either.
+- The comment is posted once per PR, not on every later push.
+- If GitHub's review list cannot be read, the cap is not enforced for that run and the
+  review goes ahead.
+- Unset or `0` means no limit. A negative number, a fraction or a non-number fails
+  config validation.
+
+Known limitations:
+
+- **The count is per PR, across all teams and configs.** The marker does not say which
+  config posted a review. When a PR touches several teams' code, each team's review
+  counts toward every team's cap, so with two teams a cap of 5 is reached after about 3
+  pushes. Size the cap with the number of teams on the PR in mind.
+- **A push during a manual review past the cap can cancel that review without a new
+  notice.** The example workflows cancel an in-progress run when a new push arrives. If
+  someone re-adds the label after the cap is reached and a push lands while that review
+  is still running, the push cancels it, the new run is skipped by the cap, and no new
+  notice is posted because the PR already has one. Wait for the manual review to finish
+  before pushing.
 
 ### Escalation path syntax
 
@@ -159,7 +192,8 @@ Outputs: `selected` (passed the trigger filter), `reviewed` (a verdict was produ
 `verdict` (`AUTO_APPROVE` / `NEEDS_HUMAN`), and `escalation_type`.
 
 The calling job must grant `contents: read`, `pull-requests: write`, `checks: read`, and
-`statuses: read`. Each job in the called workflow uses only a subset of these.
+`statuses: read`. Each job in the called workflow uses only a subset of these (the
+config job reads `pull-requests` to count reviews for `triggers.max_auto_reviews`).
 Keep the calling check **non-required**. In live mode, the approval step waits for
 required checks, so it would wait for itself.
 

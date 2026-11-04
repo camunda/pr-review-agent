@@ -18,6 +18,8 @@ test('a minimal config resolves with safe defaults', () => {
   assert.deepStrictEqual(config.policy.skills, []);
   assert.strictEqual(config.triggers.opt_in_label, 'ai-review');
   assert.deepStrictEqual(config.triggers.skip_authors, ['renovate[bot]', 'dependabot[bot]']);
+  assert.strictEqual(config.triggers.max_auto_reviews, 0, 'no review cap unless configured');
+  assert.strictEqual(outputs.max_auto_reviews, '0');
   assert.strictEqual(config.labels.needs_human, '');
   assert.strictEqual(outputs.shadow_mode, 'true');
   assert.strictEqual(outputs.vault_anthropic_secret, 'secret/data/products/acme/ci/common ANTHROPIC_API_KEY | ANTHROPIC_API_KEY ;');
@@ -111,6 +113,10 @@ const invalid = {
   'rule without paths': [`${MINIMAL_CONFIG}\nescalation:\n  rules:\n    - reason: db\n`, /paths must be a non-empty list/],
   'rule with brace glob': [`${MINIMAL_CONFIG}\nescalation:\n  rules:\n    - reason: db\n      paths: ["{a,b}/*"]\n`, /invalid glob/],
   'rule with bad reason': [`${MINIMAL_CONFIG}\nescalation:\n  rules:\n    - reason: "x\\ny"\n      paths: ["a/*"]\n`, /reason must be/],
+  'review cap of -1': [`${MINIMAL_CONFIG}\ntriggers:\n  max_auto_reviews: -1\n`, /max_auto_reviews must be a whole number/],
+  'fractional review cap': [`${MINIMAL_CONFIG}\ntriggers:\n  max_auto_reviews: 2.5\n`, /max_auto_reviews must be a whole number/],
+  'string review cap': [`${MINIMAL_CONFIG}\ntriggers:\n  max_auto_reviews: "3"\n`, /max_auto_reviews must be a whole number/],
+  'boolean review cap': [`${MINIMAL_CONFIG}\ntriggers:\n  max_auto_reviews: true\n`, /max_auto_reviews must be a whole number/],
   'numeric label': [`${MINIMAL_CONFIG}\ntriggers:\n  opt_in_label: 5\n`, /opt_in_label is invalid/],
   'bad mention': [`${MINIMAL_CONFIG}\nnotifications:\n  capture_alert_mentions: ["everyone"]\n`, /capture_alert_mentions/],
   'timeout out of range': [`${MINIMAL_CONFIG}\nagent:\n  timeout_minutes: 600\n`, /timeout_minutes/],
@@ -127,4 +133,11 @@ test('the example team config is valid', () => {
   const yaml = fs.readFileSync(path.join(ROOT, 'examples', 'config', 'my-team.yml'), 'utf8');
   const res = load(yaml);
   assert.strictEqual(res.status, 0, res.stderr);
+});
+
+test('triggers.max_auto_reviews resolves a whole number, and 0 means no limit', () => {
+  const capped = resolveConfig(`${MINIMAL_CONFIG}\ntriggers:\n  max_auto_reviews: 4\n`);
+  assert.strictEqual(capped.config.triggers.max_auto_reviews, 4);
+  assert.strictEqual(capped.outputs.max_auto_reviews, '4');
+  assert.strictEqual(resolveConfig(`${MINIMAL_CONFIG}\ntriggers:\n  max_auto_reviews: 0\n`).config.triggers.max_auto_reviews, 0);
 });
