@@ -30,14 +30,16 @@ summary. When the team enables live mode, that job can also approve the PR.
    jobs:
      review:
        if: github.event.action != 'labeled' || github.event.label.name == 'ai-review'
-       permissions: { contents: read, pull-requests: write, checks: read, statuses: read }
+       permissions: { contents: read, pull-requests: write, checks: read, statuses: read, id-token: write }
        uses: camunda/pr-review-agent/.github/workflows/pr-review.yml@v1
        with:
          config: <name>
+         vault_auth_method: jwt
        secrets:
          VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
-         VAULT_ROLE_ID: ${{ secrets.VAULT_ROLE_ID }}
-         VAULT_SECRET_ID: ${{ secrets.VAULT_SECRET_ID }}
+         VAULT_JWT_PATH: ${{ secrets.VAULT_JWT_PATH }}
+         VAULT_JWT_ROLE: ${{ secrets.VAULT_JWT_ROLE }}
+         VAULT_JWT_AUDIENCE: ${{ secrets.VAULT_JWT_AUDIENCE }}
    ```
 
    The full example is in [`examples/caller-workflow.yml`](examples/caller-workflow.yml).
@@ -62,6 +64,8 @@ summary. When the team enables live mode, that job can also approve the PR.
 | --- | --- | --- |
 | `load-config.sh` | config | Reads `.github/pr-review-agent/<name>.yml` from the calling repo's default branch, validates it, and applies defaults and built-in escalation rules |
 | `should-review.sh` | config | Trigger filter: drafts, forks, skipped authors, label events |
+| `vault-wrap-key.sh` | config | Wraps the Anthropic key in a single-use Vault token for the review job |
+| `vault-unwrap-key.sh` | review | Unwraps the key before the agent starts. The review job never logs in to Vault |
 | `load-policy.sh` | review | Copies the rubric and skills into `.policy/` from this repo or the PR base commit |
 | `render-prompt.sh` | review | Fills in the prompt placeholders |
 | `ai-review-dedup-findings.sh` | review | LLM pass that drops findings already raised in earlier rounds (fail-open) |

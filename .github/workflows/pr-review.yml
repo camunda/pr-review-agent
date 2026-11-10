@@ -45,13 +45,28 @@ on:
         required: false
         type: string
         default: ""
+      vault_auth_method:
+        description: >-
+          How the `config` job logs in to Vault: "approle" (VAULT_ROLE_ID,
+          VAULT_SECRET_ID) or "jwt" (GitHub OIDC: VAULT_JWT_PATH,
+          VAULT_JWT_ROLE, VAULT_JWT_AUDIENCE). Either way the calling job must
+          grant `id-token: write`. The agent's job never logs in to Vault.
+        required: false
+        type: string
+        default: approle
     secrets:
       VAULT_ADDR:
         required: true
       VAULT_ROLE_ID:
-        required: true
+        required: false
       VAULT_SECRET_ID:
-        required: true
+        required: false
+      VAULT_JWT_PATH:
+        required: false
+      VAULT_JWT_ROLE:
+        required: false
+      VAULT_JWT_AUDIENCE:
+        required: false
     outputs:
       verdict:
         description: AUTO_APPROVE or NEEDS_HUMAN (empty when the PR was not reviewed).
@@ -78,7 +93,10 @@ permissions: {}
 jobs:
   # ---------------------------------------------------------------------------
   # Job 0 — resolve the team config and decide whether to review at all. Never
-  # touches PR code and holds no secrets beyond the optional checkout token.
+  # touches PR code. The only job that logs in to Vault (and the only one with
+  # `id-token: write`): it hands the Anthropic key to `review` as a single-use
+  # Vault wrapping token, so the agent's job holds no Vault credentials and
+  # cannot mint OIDC tokens.
   # ---------------------------------------------------------------------------
   config:
     name: Resolve config
@@ -86,11 +104,14 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      id-token: write
     outputs:
       run: ${{ steps.should.outputs.run }}
       shadow_mode: ${{ (inputs.force_shadow_mode || steps.cfg.outputs.shadow_mode == 'true') && 'true' || 'false' }}
       timeout_minutes: ${{ steps.cfg.outputs.timeout_minutes }}
-      vault_anthropic_secret: ${{ steps.cfg.outputs.vault_anthropic_secret }}
+      # A single-use wrapping token, not the key. Deliberately not masked:
+      # GitHub drops job outputs that contain masked values.
+      anthropic_wrap_token: ${{ steps.wrap.outputs.wrap_token }}
       model: ${{ steps.cfg.outputs.model }}
       dedup_model: ${{ steps.cfg.outputs.dedup_model }}
       allowed_bots: ${{ steps.cfg.outputs.allowed_bots }}
@@ -99,15 +120,33 @@ jobs:
       capture_alert_mentions: ${{ steps.cfg.outputs.capture_alert_mentions }}
       rubric_ref: ${{ steps.cfg.outputs.rubric_ref }}
     steps:
+      # Only booleans reach the shell, never the secret values.
+      - name: Check Vault auth settings
+        env:
+          METHOD: ${{ inputs.vault_auth_method }}
+          HAS_APPROLE: ${{ secrets.VAULT_ROLE_ID != '' && secrets.VAULT_SECRET_ID != '' }}
+          HAS_JWT: ${{ secrets.VAULT_JWT_PATH != '' && secrets.VAULT_JWT_ROLE != '' }}
+        run: |
+          case "$METHOD" in
+            approle) [ "$HAS_APPROLE" = true ] || { echo "::error::vault_auth_method=approle needs the VAULT_ROLE_ID and VAULT_SECRET_ID secrets"; exit 1; } ;;
+            jwt) [ "$HAS_JWT" = true ] || { echo "::error::vault_auth_method=jwt needs the VAULT_JWT_PATH and VAULT_JWT_ROLE secrets"; exit 1; } ;;
+            *) echo "::error::vault_auth_method must be approle or jwt, got '$METHOD'"; exit 1 ;;
+          esac
+
+      # vault-action ignores the inputs of the other method; an empty `path`
+      # falls back to the method name.
       - name: Import agent checkout token
         id: token
         if: inputs.agent_repo_token_vault_secret != ''
         uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
         with:
           url: ${{ secrets.VAULT_ADDR }}
-          method: approle
+          method: ${{ inputs.vault_auth_method }}
           roleId: ${{ secrets.VAULT_ROLE_ID }}
           secretId: ${{ secrets.VAULT_SECRET_ID }}
+          path: ${{ secrets.VAULT_JWT_PATH }}
+          role: ${{ secrets.VAULT_JWT_ROLE }}
+          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
           exportEnv: false
           secrets: ${{ inputs.agent_repo_token_vault_secret }} | AGENT_REPO_TOKEN ;
 
@@ -135,6 +174,32 @@ jobs:
         env:
           CONFIG_FILE: ${{ steps.cfg.outputs.config_file }}
         run: bash .pr-review-agent/scripts/should-review.sh
+
+      - name: Read the Anthropic key
+        id: anthropic
+        if: steps.should.outputs.run == 'true'
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          method: ${{ inputs.vault_auth_method }}
+          roleId: ${{ secrets.VAULT_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_SECRET_ID }}
+          path: ${{ secrets.VAULT_JWT_PATH }}
+          role: ${{ secrets.VAULT_JWT_ROLE }}
+          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          outputToken: true
+          exportEnv: false
+          secrets: ${{ steps.cfg.outputs.vault_anthropic_secret }}
+
+      # Only the key is wrapped, not the rest of what the Vault role can read.
+      - name: Wrap the Anthropic key for the review job
+        id: wrap
+        if: steps.should.outputs.run == 'true'
+        env:
+          VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+          VAULT_TOKEN: ${{ steps.anthropic.outputs.vault_token }}
+          ANTHROPIC_API_KEY: ${{ steps.anthropic.outputs.ANTHROPIC_API_KEY }}
+        run: bash .pr-review-agent/scripts/vault-wrap-key.sh
 
       # The only place pr-review-agent is checked out (and the only job that may
       # hold the checkout token). Later jobs download this bundle: artifacts
@@ -180,19 +245,6 @@ jobs:
       - name: Resolve session transcript path
         run: echo "SESSION_MASKED_FILE=${RUNNER_TEMP}/ai-review-session-masked.json" >> "$GITHUB_ENV"
 
-      - name: Import secrets
-        id: secrets
-        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
-        with:
-          url: ${{ secrets.VAULT_ADDR }}
-          method: approle
-          roleId: ${{ secrets.VAULT_ROLE_ID }}
-          secretId: ${{ secrets.VAULT_SECRET_ID }}
-          exportEnv: false
-          # Only the Anthropic key. The agent deliberately gets NO GitHub PAT —
-          # it uses the job's read-only GITHUB_TOKEN to read the PR.
-          secrets: ${{ needs.config.outputs.vault_anthropic_secret }}
-
       # Reviewed repo first: its checkout cleans the workspace root.
       - name: Check out the reviewed repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -204,6 +256,17 @@ jobs:
         with:
           name: pr-review-agent-bundle
           path: .pr-review-agent
+
+      # Only the Anthropic key. The agent deliberately gets NO GitHub PAT — it
+      # uses the job's read-only GITHUB_TOKEN to read the PR — and this job has
+      # no Vault login and no `id-token`: after this step the wrapping token is
+      # used up, so nothing here can reach Vault again.
+      - name: Unwrap the Anthropic key
+        id: secrets
+        env:
+          VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+          WRAP_TOKEN: ${{ needs.config.outputs.anthropic_wrap_token }}
+        run: bash .pr-review-agent/scripts/vault-unwrap-key.sh
 
       # Rubric + skills into .policy/, from pr-review-agent or the PR BASE
       # commit — never the PR head.

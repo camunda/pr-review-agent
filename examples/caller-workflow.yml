@@ -38,13 +38,21 @@ jobs:
       pull-requests: write
       checks: read
       statuses: read
+      # Vault login. Only the config job (no AI) uses it; the agent's job does
+      # not get it. Needed with AppRole too.
+      id-token: write
     uses: camunda/pr-review-agent/.github/workflows/pr-review.yml@v1
     with:
       config: my-team-repo
+      vault_auth_method: jwt
       # force_shadow_mode: true   # comment-only even if the config says live
       # runs_on: ubuntu-latest
       # agent_repo_token_vault_secret: "secret/data/products/<team>/ci/github PR_REVIEW_AGENT_READ_TOKEN"
     secrets:
       VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
-      VAULT_ROLE_ID: ${{ secrets.VAULT_ROLE_ID }}
-      VAULT_SECRET_ID: ${{ secrets.VAULT_SECRET_ID }}
+      VAULT_JWT_PATH: ${{ secrets.VAULT_JWT_PATH }}
+      VAULT_JWT_ROLE: ${{ secrets.VAULT_JWT_ROLE }}
+      VAULT_JWT_AUDIENCE: ${{ secrets.VAULT_JWT_AUDIENCE }}
+      # With vault_auth_method: approle, pass these instead:
+      # VAULT_ROLE_ID: ${{ secrets.VAULT_ROLE_ID }}
+      # VAULT_SECRET_ID: ${{ secrets.VAULT_SECRET_ID }}

@@ -44,10 +44,13 @@ jobs:
       pull-requests: write
       checks: read
       statuses: read
+      id-token: write
     uses: camunda/pr-review-agent/.github/workflows/pr-review.yml@v1
     with:
       config: frontend
+      vault_auth_method: jwt
     secrets:
       VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
-      VAULT_ROLE_ID: ${{ secrets.VAULT_ROLE_ID }}
-      VAULT_SECRET_ID: ${{ secrets.VAULT_SECRET_ID }}
+      VAULT_JWT_PATH: ${{ secrets.VAULT_JWT_PATH }}
+      VAULT_JWT_ROLE: ${{ secrets.VAULT_JWT_ROLE }}
+      VAULT_JWT_AUDIENCE: ${{ secrets.VAULT_JWT_AUDIENCE }}

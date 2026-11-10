@@ -5,11 +5,11 @@ The design keeps the AI away from privileges and keeps the rules away from the P
 
 ```mermaid
 flowchart LR
-  subgraph config["config job (no PR code)"]
-    C[load + validate config<br/>should-review filter]
+  subgraph config["config job (no PR code, no AI) — id-token"]
+    C[load + validate config<br/>should-review filter] --> W[Vault login<br/>wrap the Anthropic key]
   end
-  subgraph review["review job — READ-ONLY token + Anthropic key"]
-    P[policy from pr-review-agent<br/>or PR base commit] --> A[Claude agent] --> V[(verdict.json)]
+  subgraph review["review job — READ-ONLY token + Anthropic key, NO id-token"]
+    U[unwrap the key once] --> P[policy from pr-review-agent<br/>or PR base commit] --> A[Claude agent] --> V[(verdict.json)]
     V --> D[dedup LLM pass<br/>trusted re-checkout]
   end
   subgraph decide["decide job — WRITE token, NO AI, NO key"]
@@ -58,6 +58,15 @@ flowchart LR
    anchors the approval to that commit (`commit_id`). Runs for the same PR also cancel
    each other (workflow-level `concurrency`). An approval from `github-actions[bot]` does not
    count toward required-reviewer branch protection.
+8. **The agent's job cannot reach Vault.** Only the `config` job logs in to Vault (AppRole
+   or JWT), and only it has `id-token: write`. A team's Vault role can usually read far
+   more than the Anthropic key. So `config` wraps only the key in a single-use Vault
+   response-wrapping token (`vault-wrap-key.sh`, TTL 30 minutes). The `review` job
+   unwraps it before the agent starts (`vault-unwrap-key.sh`). After that, the job holds
+   no Vault credential: the wrapping token is used up, and without `id-token` no step
+   can request a GitHub OIDC token, which would otherwise log in with the team's role
+   or reach other systems that trust the repository's OIDC tokens. If something else
+   unwraps the token first, the review fails instead of running.
 
 ## Residual risks
 
@@ -73,7 +82,7 @@ flowchart LR
   runners give passwordless sudo. A successfully injected agent should be treated as
   owning the review VM. That exposes what the review job already holds: the Anthropic
   key, which the agent process has anyway, and a read-only `GITHUB_TOKEN`. No broader
-  token is present. It can also
+  token is present, and no Vault credential or OIDC access (guarantee 8). It can also
   forge `verdict.json` and `dedup.json`. It cannot reach the write token or change the
   gate, because `decide` runs on a fresh VM, uses only pr-review-agent code, and
   re-derives escalation without the LLM. If the Anthropic key's blast radius matters
