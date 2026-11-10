@@ -82,7 +82,8 @@ resolved=$(jq --arg name "$name" '
     triggers: {
       opt_in_label: (.triggers.opt_in_label | dflt("ai-review")),
       review_drafts: (.triggers.review_drafts | dflt(false)),
-      skip_authors: (.triggers.skip_authors | dflt(["renovate[bot]", "dependabot[bot]"]))
+      skip_authors: (.triggers.skip_authors | dflt(["renovate[bot]", "dependabot[bot]"])),
+      max_auto_reviews: (.triggers.max_auto_reviews | dflt(0))
     },
     labels: {
       needs_human: (.labels.needs_human | dflt(""))
@@ -107,7 +108,7 @@ resolved=$(jq --arg name "$name" '
       (.vault | unknown("vault"; ["anthropic_api_key"])),
       (.vault.anthropic_api_key? | unknown("vault.anthropic_api_key"; ["path","field"])),
       (.agent | unknown("agent"; ["model","dedup_model","allowed_bots","timeout_minutes"])),
-      (.triggers | unknown("triggers"; ["opt_in_label","review_drafts","skip_authors"])),
+      (.triggers | unknown("triggers"; ["opt_in_label","review_drafts","skip_authors","max_auto_reviews"])),
       (.labels | unknown("labels"; ["needs_human"])),
       (.policy | unknown("policy"; ["rubric","skills","instructions"])),
       (.policy.rubric? | unknown("policy.rubric"; ["from","path"])),
@@ -150,6 +151,9 @@ errors=$(jq -r '
     (if (.triggers.review_drafts | type) != "boolean" then "triggers.review_drafts must be true or false" else empty end),
     (if (.triggers.skip_authors | type) != "array" or any(.triggers.skip_authors[]; (s("^[A-Za-z0-9_\\[\\]-]+$") | not))
      then "triggers.skip_authors must be a list of logins" else empty end),
+    (if (.triggers.max_auto_reviews | type) != "number" or .triggers.max_auto_reviews < 0
+       or .triggers.max_auto_reviews != (.triggers.max_auto_reviews | floor)
+     then "triggers.max_auto_reviews must be a whole number of at least 1 (or 0 / unset for no limit)" else empty end),
     (if (.labels.needs_human | s("^[A-Za-z0-9 ._:/-]{0,50}$") | not) then "labels.needs_human is invalid" else empty end),
     (.policy.rubric | policy_file("policy.rubric")),
     (if (.policy.skills | type) != "array" then "policy.skills must be a list"
@@ -215,6 +219,7 @@ if [ -n "${GITHUB_OUTPUT:-}" ]; then
     echo "allowed_bots=$(jq -r '.agent.allowed_bots | join(",")' <<<"$resolved")"
     echo "timeout_minutes=$(jq -r '.agent.timeout_minutes' <<<"$resolved")"
     echo "opt_in_label=$(jq -r '.triggers.opt_in_label' <<<"$resolved")"
+    echo "max_auto_reviews=$(jq -r '.triggers.max_auto_reviews' <<<"$resolved")"
     echo "needs_human_label=$(jq -r '.labels.needs_human' <<<"$resolved")"
     echo "capture_alert_mentions=$(jq -r '.notifications.capture_alert_mentions | join(" ")' <<<"$resolved")"
     echo "rubric_ref=$(jq -r '.policy.rubric | if .from == "agent" then "Rubric: `\(.path)` in pr-review-agent." else "Rubric: `\(.path)`." end' <<<"$resolved")"
