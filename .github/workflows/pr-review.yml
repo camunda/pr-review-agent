@@ -125,8 +125,20 @@ jobs:
       capture_alert_mentions: ${{ steps.cfg.outputs.capture_alert_mentions }}
       rubric_ref: ${{ steps.cfg.outputs.rubric_ref }}
     steps:
-      # Only booleans reach the shell, never the secret values.
-      - name: Check Vault auth settings
+      - name: Check Vault auth method
+        env:
+          METHOD: ${{ inputs.vault_auth_method }}
+        run: |
+          case "$METHOD" in
+            approle | jwt) ;;
+            *) echo "::error::vault_auth_method must be approle or jwt, got '$METHOD'"; exit 1 ;;
+          esac
+
+      # Secrets are checked only right before a Vault step runs: fork and
+      # Dependabot PRs get no Actions secrets and must still reach the skip in
+      # should-review.sh. Only booleans reach the shell, never the values.
+      - name: Check Vault secrets (checkout token)
+        if: inputs.agent_repo_token_vault_secret != ''
         env:
           METHOD: ${{ inputs.vault_auth_method }}
           HAS_APPROLE: ${{ secrets.VAULT_ROLE_ID != '' && secrets.VAULT_SECRET_ID != '' }}
@@ -135,7 +147,6 @@ jobs:
           case "$METHOD" in
             approle) [ "$HAS_APPROLE" = true ] || { echo "::error::vault_auth_method=approle needs the VAULT_ROLE_ID and VAULT_SECRET_ID secrets"; exit 1; } ;;
             jwt) [ "$HAS_JWT" = true ] || { echo "::error::vault_auth_method=jwt needs the VAULT_JWT_PATH and VAULT_JWT_ROLE secrets"; exit 1; } ;;
-            *) echo "::error::vault_auth_method must be approle or jwt, got '$METHOD'"; exit 1 ;;
           esac
 
       # vault-action ignores the role and credential inputs of the other method,
@@ -181,6 +192,19 @@ jobs:
           CONFIG_FILE: ${{ steps.cfg.outputs.config_file }}
           GH_TOKEN: ${{ github.token }}
         run: bash .pr-review-agent/scripts/should-review.sh
+
+      - name: Check Vault secrets (Anthropic key)
+        if: steps.should.outputs.run == 'true'
+        env:
+          METHOD: ${{ inputs.vault_auth_method }}
+          HAS_APPROLE: ${{ secrets.VAULT_ROLE_ID != '' && secrets.VAULT_SECRET_ID != '' }}
+          HAS_JWT: ${{ secrets.VAULT_JWT_PATH != '' && secrets.VAULT_JWT_ROLE != '' }}
+        # Same check as "Check Vault secrets (checkout token)".
+        run: |
+          case "$METHOD" in
+            approle) [ "$HAS_APPROLE" = true ] || { echo "::error::vault_auth_method=approle needs the VAULT_ROLE_ID and VAULT_SECRET_ID secrets"; exit 1; } ;;
+            jwt) [ "$HAS_JWT" = true ] || { echo "::error::vault_auth_method=jwt needs the VAULT_JWT_PATH and VAULT_JWT_ROLE secrets"; exit 1; } ;;
+          esac
 
       # Only the key is wrapped, not the rest of what the Vault role can read.
       # JWT: Infrastructure's shared action (the Camunda policy for agentic
