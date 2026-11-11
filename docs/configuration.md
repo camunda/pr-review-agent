@@ -201,6 +201,9 @@ of 5 minutes, through Infrastructure's shared `vault-wrapped-secrets` action (se
 [security model](security-model.md), guarantee 8). The actions come from
 `camunda/infra-global-github-actions`, so the calling repository must allow them.
 
+To retry a failed review, use **Re-run all jobs**. "Re-run failed jobs" does not re-run
+`config`, so the `review` job gets the already-used token and fails at the unwrap.
+
 Outputs: `selected` (passed the trigger filter), `reviewed` (a verdict was produced),
 `verdict` (`AUTO_APPROVE` / `NEEDS_HUMAN`), and `escalation_type`.
 

@@ -314,6 +314,21 @@ jobs:
           vault-url: ${{ secrets.VAULT_ADDR }}
           wrap-token: ${{ needs.config.outputs.anthropic_wrap_token }}
 
+      # "Re-run failed jobs" does not re-run `config`, so this job gets the old
+      # token again. A fresh token per attempt would let this job request new
+      # ones, which is what wrapping prevents, so point to "Re-run all jobs".
+      - name: Explain a failed unwrap
+        if: failure() && steps.unwrap.outcome == 'failure'
+        env:
+          ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          echo "::error::Could not unwrap the Anthropic key. The wrapping token works once and for 5 minutes."
+          if [ "$ATTEMPT" -gt 1 ]; then
+            echo "::error::This is attempt $ATTEMPT: 'Re-run failed jobs' reuses the token of the first attempt. Use 'Re-run all jobs' instead."
+          else
+            echo "::error::The token expired before this job started (runner queue), or something else unwrapped it first. Treat the second case as tampering. Use 'Re-run all jobs' to retry."
+          fi
+
       - name: Resolve session transcript path
         run: echo "SESSION_MASKED_FILE=${RUNNER_TEMP}/ai-review-session-masked.json" >> "$GITHUB_ENV"
 
