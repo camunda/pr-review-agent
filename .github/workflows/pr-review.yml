@@ -212,7 +212,7 @@ jobs:
       - name: Wrap the Anthropic key for the review job (JWT)
         id: wrap_jwt
         if: steps.should.outputs.run == 'true' && inputs.vault_auth_method == 'jwt'
-        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/wrap@c21e31eece771eb13d6c5e08e8831c9de62888bd # vault-wrapped-secrets-1.0.0
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/wrap@6644ac7ceab8e1b32359cc25a5161c46156fc319 # vault-wrapped-secrets-1.0.1
         with:
           vault-url: ${{ secrets.VAULT_ADDR }}
           vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
@@ -325,6 +325,11 @@ jobs:
     env:
       SHADOW_MODE: ${{ needs.config.outputs.shadow_mode }}
     steps:
+      # First, so the always() transcript steps get a path even when a later
+      # step (the OIDC check, the unwrap) fails the job early.
+      - name: Resolve session transcript path
+        run: echo "SESSION_MASKED_FILE=${RUNNER_TEMP}/ai-review-session-masked.json" >> "$GITHUB_ENV"
+
       # Guarantee 8 at runtime: GitHub sets ACTIONS_ID_TOKEN_REQUEST_URL only
       # when the job has `id-token: write`. Fails a future edit that grants it
       # here, before the key is unwrapped and before the agent runs.
@@ -344,7 +349,7 @@ jobs:
       # expired or something else unwrapped it first.
       - name: Unwrap the Anthropic key
         id: unwrap
-        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/unwrap@c21e31eece771eb13d6c5e08e8831c9de62888bd # vault-wrapped-secrets-1.0.0
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/unwrap@6644ac7ceab8e1b32359cc25a5161c46156fc319 # vault-wrapped-secrets-1.0.1
         with:
           vault-url: ${{ secrets.VAULT_ADDR }}
           wrap-token: ${{ needs.config.outputs.anthropic_wrap_token }}
@@ -363,9 +368,6 @@ jobs:
           else
             echo "::error::The token expired before this job started (runner queue), or something else unwrapped it first. Treat the second case as tampering. Use 'Re-run all jobs' to retry."
           fi
-
-      - name: Resolve session transcript path
-        run: echo "SESSION_MASKED_FILE=${RUNNER_TEMP}/ai-review-session-masked.json" >> "$GITHUB_ENV"
 
       # Reviewed repo first: its checkout cleans the workspace root.
       - name: Check out the reviewed repository
