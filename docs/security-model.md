@@ -65,13 +65,13 @@ flowchart LR
    [Vault secrets in agentic workflows](https://docs.int.camunda.com/docs/vault/vault-secrets-in-agentic-workflows)
    policy and uses its shared `vault-wrapped-secrets` action (`wrap` for JWT,
    `vault-wrap-key.sh` for AppRole until AppRole is turned off). The `review` job
-   unwraps it in its first step, before the agent starts (`vault-wrapped-secrets/unwrap`,
+   unwraps it at the start, before any checkout and before the agent starts (`vault-wrapped-secrets/unwrap`,
    which also rejects a token not created by `sys/wrapping/wrap`). After that, the job holds
    no Vault credential: the wrapping token is used up, and without `id-token` no step
    can request a GitHub OIDC token, which would otherwise log in with the team's role
    or reach other systems that trust the repository's OIDC tokens. If something else
-   unwraps the token first, the review fails instead of running. The `review` job's
-   first step fails if the job has OIDC access, so a later edit that grants
+   unwraps the token first, the review fails instead of running. Before the unwrap, a
+   step fails the `review` job if it has OIDC access, so a later edit that grants
    `id-token: write` there cannot slip through.
 
 ## Residual risks
