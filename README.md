@@ -64,8 +64,7 @@ summary. When the team enables live mode, that job can also approve the PR.
 | --- | --- | --- |
 | `load-config.sh` | config | Reads `.github/pr-review-agent/<name>.yml` from the calling repo's default branch, validates it, and applies defaults and built-in escalation rules |
 | `should-review.sh` | config | Trigger filter: drafts, forks, skipped authors, label events |
-| `vault-wrap-key.sh` | config | Wraps the Anthropic key in a single-use Vault token for the review job |
-| `vault-unwrap-key.sh` | review | Unwraps the key before the agent starts. The review job never logs in to Vault |
+| `vault-wrap-key.sh` | config | AppRole only: wraps the Anthropic key in a single-use Vault token for the review job. JWT uses the shared `vault-wrapped-secrets/wrap` action, and the review job unwraps with `vault-wrapped-secrets/unwrap` |
 | `load-policy.sh` | review | Copies the rubric and skills into `.policy/` from this repo or the PR base commit |
 | `render-prompt.sh` | review | Fills in the prompt placeholders |
 | `ai-review-dedup-findings.sh` | review | LLM pass that drops findings already raised in earlier rounds (fail-open) |

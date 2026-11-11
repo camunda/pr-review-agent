@@ -1,5 +1,6 @@
-// vault-wrap-key.sh / vault-unwrap-key.sh hand the Anthropic key from the
-// `config` job to the `review` job as a single-use Vault wrapping token.
+// vault-wrap-key.sh wraps the Anthropic key for the `review` job (AppRole only;
+// JWT uses the shared vault-wrapped-secrets/wrap action). The payload must match
+// what vault-wrapped-secrets/unwrap reads: a flat {NAME: value} object.
 // `curl` is stubbed: it logs its argv, its headers and its body, and answers
 // with a canned response.
 
@@ -44,16 +45,15 @@ exit ${exit}
 const wrap = (opts) => withCurl('vault-wrap-key.sh', {
   ...opts, env: { VAULT_TOKEN, ANTHROPIC_API_KEY: KEY, ...opts.env },
 });
-const unwrap = (opts) => withCurl('vault-unwrap-key.sh', { ...opts, env: { WRAP_TOKEN, ...opts.env } });
 
 test('wrap: wraps only the key and outputs the wrapping token', () => {
-  const { res, argv, headers, body } = wrap({ response: { wrap_info: { token: WRAP_TOKEN, ttl: 1800 } } });
+  const { res, argv, headers, body } = wrap({ response: { wrap_info: { token: WRAP_TOKEN, ttl: 300 } } });
   assert.strictEqual(res.status, 0, res.stderr);
   assert.strictEqual(res.outputs.wrap_token, WRAP_TOKEN);
   assert.deepStrictEqual(JSON.parse(body), { ANTHROPIC_API_KEY: KEY });
   assert.match(argv, /https:\/\/vault\.example\/v1\/sys\/wrapping\/wrap/);
   assert.match(headers, new RegExp(`X-Vault-Token: ${VAULT_TOKEN}`));
-  assert.match(headers, /X-Vault-Wrap-TTL: 30m/);
+  assert.match(headers, /X-Vault-Wrap-TTL: 5m/);
 });
 
 test('wrap: never puts the key or the Vault token on argv or in the log', () => {
@@ -63,8 +63,8 @@ test('wrap: never puts the key or the Vault token on argv or in the log', () => 
 });
 
 test('wrap: WRAP_TTL overrides the default TTL', () => {
-  const { headers } = wrap({ response: { wrap_info: { token: WRAP_TOKEN } }, env: { WRAP_TTL: '5m' } });
-  assert.match(headers, /X-Vault-Wrap-TTL: 5m/);
+  const { headers } = wrap({ response: { wrap_info: { token: WRAP_TOKEN } }, env: { WRAP_TTL: '10m' } });
+  assert.match(headers, /X-Vault-Wrap-TTL: 10m/);
 });
 
 test('wrap: fails with the Vault error when Vault refuses', () => {
@@ -79,34 +79,4 @@ test('wrap: fails when Vault returns no wrapping token', () => {
   assert.strictEqual(res.status, 1);
   assert.match(res.stdout, /no wrapping token/);
   assert.strictEqual(res.outputs.wrap_token, undefined);
-});
-
-test('unwrap: outputs the key, masked, and keeps the token off argv', () => {
-  const { res, argv, headers } = unwrap({ response: { data: { ANTHROPIC_API_KEY: KEY } } });
-  assert.strictEqual(res.status, 0, res.stderr);
-  assert.strictEqual(res.outputs.ANTHROPIC_API_KEY, KEY);
-  assert.ok(res.stdout.includes(`::add-mask::${KEY}`));
-  assert.match(argv, /https:\/\/vault\.example\/v1\/sys\/wrapping\/unwrap/);
-  assert.ok(!argv.includes(WRAP_TOKEN));
-  assert.match(headers, new RegExp(`X-Vault-Token: ${WRAP_TOKEN}`));
-});
-
-test('unwrap: fails and flags possible tampering when the token is already used', () => {
-  const { res } = unwrap({ response: { errors: ['wrapping token is not valid or does not exist'] }, exit: 22 });
-  assert.strictEqual(res.status, 1);
-  assert.match(res.stdout, /not valid or does not exist/);
-  assert.match(res.stdout, /tampering/);
-  assert.strictEqual(res.outputs.ANTHROPIC_API_KEY, undefined);
-});
-
-test('unwrap: fails when the response holds no key', () => {
-  const { res } = unwrap({ response: { data: { OTHER: 'x' } } });
-  assert.strictEqual(res.status, 1);
-  assert.match(res.stdout, /no ANTHROPIC_API_KEY/);
-});
-
-test('unwrap: fails without a wrapping token', () => {
-  const { res } = unwrap({ response: {}, env: { WRAP_TOKEN: '' } });
-  assert.notStrictEqual(res.status, 0);
-  assert.match(res.stderr, /WRAP_TOKEN is required/);
 });

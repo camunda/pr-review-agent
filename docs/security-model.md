@@ -61,8 +61,12 @@ flowchart LR
 8. **The agent's job cannot reach Vault.** Only the `config` job logs in to Vault (AppRole
    or JWT), and only it has `id-token: write`. A team's Vault role can usually read far
    more than the Anthropic key. So `config` wraps only the key in a single-use Vault
-   response-wrapping token (`vault-wrap-key.sh`, TTL 30 minutes). The `review` job
-   unwraps it before the agent starts (`vault-unwrap-key.sh`). After that, the job holds
+   response-wrapping token with a TTL of 5 minutes. This follows Infrastructure's
+   [Vault secrets in agentic workflows](https://docs.int.camunda.com/docs/vault/vault-secrets-in-agentic-workflows)
+   policy and uses its shared `vault-wrapped-secrets` action (`wrap` for JWT,
+   `vault-wrap-key.sh` for AppRole until AppRole is turned off). The `review` job
+   unwraps it in its first step, before the agent starts (`vault-wrapped-secrets/unwrap`,
+   which also rejects a token not created by `sys/wrapping/wrap`). After that, the job holds
    no Vault credential: the wrapping token is used up, and without `id-token` no step
    can request a GitHub OIDC token, which would otherwise log in with the team's role
    or reach other systems that trust the repository's OIDC tokens. If something else

@@ -182,7 +182,7 @@ skills, because the workflow parses them.
 | --- | --- | --- |
 | `config` | (required) | Config name, i.e. `.github/pr-review-agent/<config>.yml` in the calling repo. |
 | `force_shadow_mode` | `false` | Force comment-only mode. It can never disable shadow mode. |
-| `runs_on` | `ubuntu-slim` | Runner label. The runner needs `jq`, `yq` (v4), `perl`, `gh`, `git` and `curl`. |
+| `runs_on` | `ubuntu-slim` | Runner label. The runner needs `jq`, `yq` (v4), `perl`, `gh`, `git`, `curl` and `openssl`. |
 | `agent_repo_token_vault_secret` | `""` | `"<vault path> <field>"` for a token that can read this repo. Use it when the caller's `GITHUB_TOKEN` cannot check out pr-review-agent (the usual case for an internal repo). Only the `config` job imports it; the agent job never sees it. Prefer a token scoped to `contents: read` on pr-review-agent. |
 | `vault_auth_method` | `approle` | How the `config` job logs in to Vault: `jwt` (GitHub OIDC, recommended) or `approle`. Infrastructure is replacing AppRole with JWT (camunda/team-infrastructure#1076). |
 
@@ -196,8 +196,10 @@ sets on repositories that are onboarded to Vault.
 
 The Vault role must be able to read `vault.anthropic_api_key.path`, and its token must
 have Vault's `default` policy, which allows response wrapping. Only the `config` job
-logs in. It hands the key to the agent's job as a single-use wrapping token (see the
-[security model](security-model.md), guarantee 8).
+logs in. It hands the key to the agent's job as a single-use wrapping token with a TTL
+of 5 minutes, through Infrastructure's shared `vault-wrapped-secrets` action (see the
+[security model](security-model.md), guarantee 8). The actions come from
+`camunda/infra-global-github-actions`, so the calling repository must allow them.
 
 Outputs: `selected` (passed the trigger filter), `reviewed` (a verdict was produced),
 `verdict` (`AUTO_APPROVE` / `NEEDS_HUMAN`), and `escalation_type`.

@@ -116,7 +116,7 @@ jobs:
       timeout_minutes: ${{ steps.cfg.outputs.timeout_minutes }}
       # A single-use wrapping token, not the key. Deliberately not masked:
       # GitHub drops job outputs that contain masked values.
-      anthropic_wrap_token: ${{ steps.wrap.outputs.wrap_token }}
+      anthropic_wrap_token: ${{ steps.wrap_jwt.outputs.wrap-token || steps.wrap.outputs.wrap_token }}
       model: ${{ steps.cfg.outputs.model }}
       dedup_model: ${{ steps.cfg.outputs.dedup_model }}
       allowed_bots: ${{ steps.cfg.outputs.allowed_bots }}
@@ -181,26 +181,40 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash .pr-review-agent/scripts/should-review.sh
 
-      - name: Read the Anthropic key
+      # Only the key is wrapped, not the rest of what the Vault role can read.
+      # JWT: Infrastructure's shared action (the Camunda policy for agentic
+      # workflows). It logs in, reads the key and wraps it in one step.
+      - name: Wrap the Anthropic key for the review job (JWT)
+        id: wrap_jwt
+        if: steps.should.outputs.run == 'true' && inputs.vault_auth_method == 'jwt'
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/wrap@c21e31eece771eb13d6c5e08e8831c9de62888bd # vault-wrapped-secrets-1.0.0
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-auth-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-auth-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          secrets: ${{ steps.cfg.outputs.vault_anthropic_secret }}
+          wrap-ttl: 5m
+
+      # AppRole: the shared action supports JWT only, so read the key with
+      # vault-action and wrap it with our script. Remove both steps once
+      # Infrastructure turns off AppRole (camunda/team-infrastructure#1076).
+      - name: Read the Anthropic key (AppRole)
         id: anthropic
-        if: steps.should.outputs.run == 'true'
+        if: steps.should.outputs.run == 'true' && inputs.vault_auth_method == 'approle'
         uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
         with:
           url: ${{ secrets.VAULT_ADDR }}
-          method: ${{ inputs.vault_auth_method }}
+          method: approle
           roleId: ${{ secrets.VAULT_ROLE_ID }}
           secretId: ${{ secrets.VAULT_SECRET_ID }}
-          path: ${{ secrets.VAULT_JWT_PATH }}
-          role: ${{ secrets.VAULT_JWT_ROLE }}
-          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
           outputToken: true
           exportEnv: false
           secrets: ${{ steps.cfg.outputs.vault_anthropic_secret }}
 
-      # Only the key is wrapped, not the rest of what the Vault role can read.
-      - name: Wrap the Anthropic key for the review job
+      - name: Wrap the Anthropic key for the review job (AppRole)
         id: wrap
-        if: steps.should.outputs.run == 'true'
+        if: steps.should.outputs.run == 'true' && inputs.vault_auth_method == 'approle'
         env:
           VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
           VAULT_TOKEN: ${{ steps.anthropic.outputs.vault_token }}
@@ -286,6 +300,19 @@ jobs:
     env:
       SHADOW_MODE: ${{ needs.config.outputs.shadow_mode }}
     steps:
+      # First step, so the 5-minute wrap TTL only has to cover the queue wait.
+      # Only the Anthropic key. The agent deliberately gets NO GitHub PAT — it
+      # uses the job's read-only GITHUB_TOKEN to read the PR — and this job has
+      # no Vault login and no `id-token`: after this step the wrapping token is
+      # used up, so nothing here can reach Vault again. Fails if the token
+      # expired or something else unwrapped it first.
+      - name: Unwrap the Anthropic key
+        id: unwrap
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/unwrap@c21e31eece771eb13d6c5e08e8831c9de62888bd # vault-wrapped-secrets-1.0.0
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          wrap-token: ${{ needs.config.outputs.anthropic_wrap_token }}
+
       - name: Resolve session transcript path
         run: echo "SESSION_MASKED_FILE=${RUNNER_TEMP}/ai-review-session-masked.json" >> "$GITHUB_ENV"
 
@@ -300,17 +327,6 @@ jobs:
         with:
           name: pr-review-agent-bundle
           path: .pr-review-agent
-
-      # Only the Anthropic key. The agent deliberately gets NO GitHub PAT — it
-      # uses the job's read-only GITHUB_TOKEN to read the PR — and this job has
-      # no Vault login and no `id-token`: after this step the wrapping token is
-      # used up, so nothing here can reach Vault again.
-      - name: Unwrap the Anthropic key
-        id: secrets
-        env:
-          VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
-          WRAP_TOKEN: ${{ needs.config.outputs.anthropic_wrap_token }}
-        run: bash .pr-review-agent/scripts/vault-unwrap-key.sh
 
       # Rubric + skills into .policy/, from pr-review-agent or the PR BASE
       # commit — never the PR head.
@@ -338,7 +354,7 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
         with:
-          anthropic_api_key: ${{ steps.secrets.outputs.ANTHROPIC_API_KEY }}
+          anthropic_api_key: ${{ fromJSON(steps.unwrap.outputs.secrets).ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: ${{ steps.prompt.outputs.text }}
           # Named bots only (never `*`): lets e.g. a PR opened by Claude itself
@@ -375,7 +391,7 @@ jobs:
         if: success() && hashFiles('ai-review/verdict.json') != ''
         continue-on-error: true
         env:
-          ANTHROPIC_API_KEY: ${{ steps.secrets.outputs.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ fromJSON(steps.unwrap.outputs.secrets).ANTHROPIC_API_KEY }}
           ANTHROPIC_DEDUP_MODEL: ${{ needs.config.outputs.dedup_model }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
@@ -409,7 +425,7 @@ jobs:
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
           MASKED_FILE: ${{ env.SESSION_MASKED_FILE }}
           # Passed via env (read from %ENV), never on argv.
-          ANTHROPIC_API_KEY: ${{ steps.secrets.outputs.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ fromJSON(steps.unwrap.outputs.secrets).ANTHROPIC_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash .trusted-agent/scripts/ai-review-mask-session.sh
 
