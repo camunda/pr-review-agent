@@ -325,7 +325,18 @@ jobs:
     env:
       SHADOW_MODE: ${{ needs.config.outputs.shadow_mode }}
     steps:
-      # First step, so the 5-minute wrap TTL only has to cover the queue wait.
+      # Guarantee 8 at runtime: GitHub sets ACTIONS_ID_TOKEN_REQUEST_URL only
+      # when the job has `id-token: write`. Fails a future edit that grants it
+      # here, before the key is unwrapped and before the agent runs.
+      - name: Check that this job has no OIDC access
+        run: |
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "::error::The review job has id-token access. It must never have it (docs/security-model.md, guarantee 8)."
+            exit 1
+          fi
+          echo "OK: no OIDC token access in this job."
+
+      # Runs right away, so the 5-minute wrap TTL only has to cover the queue wait.
       # Only the Anthropic key. The agent deliberately gets NO GitHub PAT — it
       # uses the job's read-only GITHUB_TOKEN to read the PR — and this job has
       # no Vault login and no `id-token`: after this step the wrapping token is

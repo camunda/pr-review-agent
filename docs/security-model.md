@@ -70,7 +70,9 @@ flowchart LR
    no Vault credential: the wrapping token is used up, and without `id-token` no step
    can request a GitHub OIDC token, which would otherwise log in with the team's role
    or reach other systems that trust the repository's OIDC tokens. If something else
-   unwraps the token first, the review fails instead of running.
+   unwraps the token first, the review fails instead of running. The `review` job's
+   first step fails if the job has OIDC access, so a later edit that grants
+   `id-token: write` there cannot slip through.
 
 ## Residual risks
 
