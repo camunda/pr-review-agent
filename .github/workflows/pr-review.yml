@@ -138,8 +138,9 @@ jobs:
             *) echo "::error::vault_auth_method must be approle or jwt, got '$METHOD'"; exit 1 ;;
           esac
 
-      # vault-action ignores the inputs of the other method; an empty `path`
-      # falls back to the method name.
+      # vault-action ignores the role and credential inputs of the other method,
+      # but builds the login URL from `path` for every method. So `path` is set
+      # only for JWT; an empty `path` falls back to the method name (approle).
       - name: Import agent checkout token
         id: token
         if: inputs.agent_repo_token_vault_secret != ''
@@ -149,7 +150,7 @@ jobs:
           method: ${{ inputs.vault_auth_method }}
           roleId: ${{ secrets.VAULT_ROLE_ID }}
           secretId: ${{ secrets.VAULT_SECRET_ID }}
-          path: ${{ secrets.VAULT_JWT_PATH }}
+          path: ${{ inputs.vault_auth_method == 'jwt' && secrets.VAULT_JWT_PATH || '' }}
           role: ${{ secrets.VAULT_JWT_ROLE }}
           jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
           exportEnv: false
