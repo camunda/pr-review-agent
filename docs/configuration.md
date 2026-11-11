@@ -182,18 +182,37 @@ skills, because the workflow parses them.
 | --- | --- | --- |
 | `config` | (required) | Config name, i.e. `.github/pr-review-agent/<config>.yml` in the calling repo. |
 | `force_shadow_mode` | `false` | Force comment-only mode. It can never disable shadow mode. |
-| `runs_on` | `ubuntu-slim` | Runner label. The runner needs `jq`, `yq` (v4), `perl`, `gh` and `git`. |
+| `runs_on` | `ubuntu-slim` | Runner label. The runner needs `jq`, `yq` (v4), `perl`, `gh`, `git`, `curl` and `openssl`. |
 | `agent_repo_token_vault_secret` | `""` | `"<vault path> <field>"` for a token that can read this repo. Use it when the caller's `GITHUB_TOKEN` cannot check out pr-review-agent (the usual case for an internal repo). Only the `config` job imports it; the agent job never sees it. Prefer a token scoped to `contents: read` on pr-review-agent. |
+| `vault_auth_method` | `approle` | How the `config` job logs in to Vault: `jwt` (GitHub OIDC, recommended) or `approle`. Infrastructure is replacing AppRole with JWT (camunda/team-infrastructure#1076). |
 
-Secrets: `VAULT_ADDR`, `VAULT_ROLE_ID`, `VAULT_SECRET_ID`. The AppRole must be able to
-read `vault.anthropic_api_key.path`.
+Secrets: `VAULT_ADDR`, plus the secrets of the chosen method. Infrastructure sets both
+sets on repositories that are onboarded to Vault.
+
+| `vault_auth_method` | Secrets |
+| --- | --- |
+| `jwt` | `VAULT_JWT_PATH`, `VAULT_JWT_ROLE`, `VAULT_JWT_AUDIENCE` |
+| `approle` | `VAULT_ROLE_ID`, `VAULT_SECRET_ID` |
+
+The Vault role must be able to read `vault.anthropic_api_key.path`, and its token must
+have Vault's `default` policy, which allows response wrapping. Only the `config` job
+logs in. It hands the key to the agent's job as a single-use wrapping token with a TTL
+of 5 minutes, through Infrastructure's shared `vault-wrapped-secrets` action (see the
+[security model](security-model.md), guarantee 8). The actions come from
+`camunda/infra-global-github-actions`, so the calling repository must allow them.
+
+To retry a failed review, use **Re-run all jobs**. "Re-run failed jobs" does not re-run
+`config`, so the `review` job gets the already-used token and fails at the unwrap.
 
 Outputs: `selected` (passed the trigger filter), `reviewed` (a verdict was produced),
 `verdict` (`AUTO_APPROVE` / `NEEDS_HUMAN`), and `escalation_type`.
 
-The calling job must grant `contents: read`, `pull-requests: write`, `checks: read`, and
-`statuses: read`. Each job in the called workflow uses only a subset of these (the
-config job reads `pull-requests` to count reviews for `triggers.max_auto_reviews`).
+The calling job must grant `contents: read`, `pull-requests: write`, `checks: read`,
+`statuses: read`, and `id-token: write`. Each job in the called workflow uses only a
+subset of these (the config job reads `pull-requests` to count reviews for
+`triggers.max_auto_reviews`). Only the `config` job, which runs no AI, uses
+`id-token: write`. GitHub checks the permissions when the workflow starts, so AppRole
+callers must grant it too.
 Keep the calling check **non-required**. In live mode, the approval step waits for
 required checks, so it would wait for itself.
 

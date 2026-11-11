@@ -9,7 +9,7 @@ shadow_mode: true
 
 vault:
   anthropic_api_key:
-    # Ask your team's Vault admin for a path your AppRole can read.
+    # Ask your team's Vault admin for a path your Vault role can read.
     path: secret/data/products/my-team/ci/common
 
 triggers:
