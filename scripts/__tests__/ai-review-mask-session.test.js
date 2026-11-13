@@ -237,3 +237,35 @@ test('in-place mode refuses a directory, which would be uploaded unmasked', () =
   assert.throws(() => runInPlace([dedup]), 'a directory input must fail the step');
   assert.deepStrictEqual(fs.readdirSync(dedup), ['leak.json'], 'nothing is moved into the directory');
 });
+
+test('in-place mode masks a key hidden with JSON \\u escapes', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-review-mask-'));
+  const verdict = path.join(dir, 'verdict.json');
+  const escaped = (s) => [...s].map((c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`).join('');
+  // Written by hand, so the file holds the escapes, not the literal key.
+  fs.writeFileSync(
+    verdict,
+    `{"verdict":"NEEDS_HUMAN","confidence":0.9,"ok":true,"none":null,` +
+      `"reason":"${escaped(ANTHROPIC_API_KEY)}","${escaped(GITHUB_TOKEN)}":["x"]}`,
+  );
+  assert.ok(!fs.readFileSync(verdict, 'utf8').includes(ANTHROPIC_API_KEY), 'precondition: no literal key');
+  runInPlace([verdict]);
+  const text = fs.readFileSync(verdict, 'utf8');
+  const parsed = JSON.parse(text);
+  assert.ok(!JSON.stringify(parsed).includes(ANTHROPIC_API_KEY), 'decoded value must not hold the key');
+  assert.ok(!Object.keys(parsed).includes(GITHUB_TOKEN), 'decoded keys must not hold the token');
+  assert.match(parsed.reason, /REDACTED/);
+  assert.deepStrictEqual(
+    [parsed.verdict, parsed.confidence, parsed.ok, parsed.none],
+    ['NEEDS_HUMAN', 0.9, true, null],
+    'other values keep their type',
+  );
+});
+
+test('in-place mode still masks a file that is not valid JSON', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-review-mask-'));
+  const verdict = path.join(dir, 'verdict.json');
+  fs.writeFileSync(verdict, `not json ${ANTHROPIC_API_KEY}`);
+  runInPlace([verdict]);
+  assert.ok(!fs.readFileSync(verdict, 'utf8').includes(ANTHROPIC_API_KEY));
+});

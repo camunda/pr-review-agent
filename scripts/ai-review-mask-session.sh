@@ -28,27 +28,56 @@
 #   GITHUB_TOKEN       argv (which would expose them via the process list).
 set -uo pipefail
 
-# mask SRC DST — write a masked copy of SRC to DST.
+# redact(TEXT) — the masking rules, shared by both passes below.
 # The token-shape rules are deliberately over-eager (e.g. `sk-` matches any
 # 20+ char token with that prefix): over-redaction is the safe direction, at the
 # cost of occasionally masking an unrelated identifier. No rule emits a quote
 # or backslash, so masked JSON stays valid JSON.
-mask() {
-  perl -0777 -pe '
+# shellcheck disable=SC2016  # Perl code, expanded by Perl, not the shell.
+REDACT='
+  sub redact {
+    my ($s) = @_;
     for my $k (qw(ANTHROPIC_API_KEY GITHUB_TOKEN)) {
       my $v = $ENV{$k};
       next unless defined $v && length($v) >= 8;
       my $q = quotemeta($v);
-      s/$q/***REDACTED***/g;
+      $s =~ s/$q/***REDACTED***/g;
     }
-    s/\bgithub_pat_[A-Za-z0-9_]{20,}/***REDACTED***/g;
-    s/\bgh[pousr]_[A-Za-z0-9]{20,}/***REDACTED***/g;
-    s/\bsk-ant-[A-Za-z0-9_-]{16,}/***REDACTED***/g;
-    s/\bsk-[A-Za-z0-9]{20,}/***REDACTED***/g;
-    s/\bAKIA[0-9A-Z]{16}\b/***REDACTED***/g;
-    s/(Bearer\s+)[A-Za-z0-9._~+\/-]{16,}=*/${1}***REDACTED***/gi;
-    s/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+/***REDACTED***/g;
-    s/(AUTHORIZATION:\s*basic\s+)[A-Za-z0-9+\/=]+/${1}***REDACTED***/gi;
+    $s =~ s/\bgithub_pat_[A-Za-z0-9_]{20,}/***REDACTED***/g;
+    $s =~ s/\bgh[pousr]_[A-Za-z0-9]{20,}/***REDACTED***/g;
+    $s =~ s/\bsk-ant-[A-Za-z0-9_-]{16,}/***REDACTED***/g;
+    $s =~ s/\bsk-[A-Za-z0-9]{20,}/***REDACTED***/g;
+    $s =~ s/\bAKIA[0-9A-Z]{16}\b/***REDACTED***/g;
+    $s =~ s/(Bearer\s+)[A-Za-z0-9._~+\/-]{16,}=*/${1}***REDACTED***/gi;
+    $s =~ s/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+/***REDACTED***/g;
+    $s =~ s/(AUTHORIZATION:\s*basic\s+)[A-Za-z0-9+\/=]+/${1}***REDACTED***/gi;
+    return $s;
+  }
+'
+
+# mask SRC DST — write a masked copy of SRC to DST, as plain text.
+mask() {
+  perl -0777 -ne "$REDACT"' print redact($_);' "$1" > "$2"
+}
+
+# mask_json SRC DST — like mask, but when SRC is valid JSON, decode it first
+# and mask every string and key. Otherwise a `\uXXXX`-escaped secret would get
+# through, and `decide` (`jq -r`) would decode it into the posted review. Not
+# valid JSON: plain-text masking; `jq` in `decide` cannot decode that file.
+mask_json() {
+  perl -MJSON::PP -0777 -ne "$REDACT"'
+    my $data = eval { JSON::PP->new->utf8->allow_nonref->decode($_) };
+    if ($@) { print redact($_); exit 0 }
+    sub walk {
+      my ($v) = @_;
+      return $v if JSON::PP::is_bool($v);
+      return { map { redact($_) => walk($v->{$_}) } keys %$v } if ref $v eq "HASH";
+      return [ map { walk($_) } @$v ] if ref $v eq "ARRAY";
+      return $v unless defined $v;
+      my $r = redact($v);
+      return $r eq $v ? $v : $r;  # keeps numbers numbers
+    }
+    print JSON::PP->new->utf8->canonical->allow_nonref->encode(walk($data));
   ' "$1" > "$2"
 }
 
@@ -72,7 +101,7 @@ if [ "$#" -gt 0 ]; then
       echo "::error::Cannot create a temp file to mask $f; refusing to continue"
       exit 1
     }
-    if mask "$f" "$tmp" && mv -f "$tmp" "$f"; then
+    if mask_json "$f" "$tmp" && mv -f "$tmp" "$f"; then
       echo "Masked $f"
     else
       rm -f "$tmp"
