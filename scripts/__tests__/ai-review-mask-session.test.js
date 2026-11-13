@@ -148,9 +148,9 @@ test('a masking failure leaves no half-masked output behind', () => {
 // `ai-review-verdict` upload, because `decide` posts their text on the PR.
 
 /** Run the script in in-place mode on the given files. */
-function runInPlace(files) {
+function runInPlace(files, { runnerTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-review-runner-temp-')) } = {}) {
   return execFileSync('bash', [SCRIPT, ...files], {
-    env: { ...process.env, ANTHROPIC_API_KEY, GITHUB_TOKEN },
+    env: { ...process.env, ANTHROPIC_API_KEY, GITHUB_TOKEN, RUNNER_TEMP: runnerTemp },
     stdio: ['ignore', 'pipe', 'pipe'],
   }).toString();
 }
@@ -195,12 +195,36 @@ test('in-place mode fails closed when masking fails', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-review-mask-'));
   const verdict = path.join(dir, 'verdict.json');
   fs.writeFileSync(verdict, JSON.stringify({ summary: ANTHROPIC_API_KEY }));
-  // A read-only directory makes the temp-file redirection fail.
+  const runnerTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-review-runner-temp-'));
+  // A read-only directory makes the final `mv` into place fail.
   fs.chmodSync(dir, 0o500);
   try {
-    assert.throws(() => runInPlace([verdict]), 'the step must fail so the file is not uploaded');
+    assert.throws(() => runInPlace([verdict], { runnerTemp }), 'the step must fail so the file is not uploaded');
   } finally {
     fs.chmodSync(dir, 0o700);
   }
-  assert.ok(!fs.existsSync(`${verdict}.masked`), 'no half-masked temp file remains');
+  assert.deepStrictEqual(fs.readdirSync(runnerTemp), [], 'no half-masked temp file remains');
+});
+
+test('in-place mode refuses a symlink and never writes through one', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-review-mask-'));
+  const trusted = path.join(dir, 'trusted.sh');
+  fs.writeFileSync(trusted, 'echo ORIGINAL\n');
+  const verdict = path.join(dir, 'verdict.json');
+  fs.symlinkSync(trusted, verdict);
+  assert.throws(() => runInPlace([verdict]), 'a symlinked input must fail the step');
+  assert.strictEqual(fs.readFileSync(trusted, 'utf8'), 'echo ORIGINAL\n', 'the symlink target is untouched');
+});
+
+test('in-place mode ignores a planted <file>.masked symlink', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-review-mask-'));
+  const trusted = path.join(dir, 'trusted.sh');
+  fs.writeFileSync(trusted, 'echo ORIGINAL\n');
+  const verdict = path.join(dir, 'verdict.json');
+  fs.writeFileSync(verdict, `echo PWNED ${ANTHROPIC_API_KEY}\n`);
+  fs.symlinkSync(trusted, `${verdict}.masked`);
+  runInPlace([verdict]);
+  assert.strictEqual(fs.readFileSync(trusted, 'utf8'), 'echo ORIGINAL\n', 'the trusted script is untouched');
+  assert.ok(!fs.lstatSync(verdict).isSymbolicLink(), 'verdict.json stays a regular file');
+  assert.ok(!fs.readFileSync(verdict, 'utf8').includes(ANTHROPIC_API_KEY));
 });

@@ -402,8 +402,10 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: bash .pr-review-agent/scripts/load-policy.sh
 
+      # Start empty: the PR checkout could contain ai-review/ entries (for
+      # example a symlink to a trusted script) that later steps would write to.
       - name: Prepare verdict output directory
-        run: mkdir -p ai-review
+        run: rm -rf ai-review && mkdir ai-review
 
       - name: Render review prompt
         id: prompt

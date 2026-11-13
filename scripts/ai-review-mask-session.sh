@@ -54,11 +54,23 @@ mask() {
 
 if [ "$#" -gt 0 ]; then
   for f in "$@"; do
+    # A symlink could point the masked output (or the upload) at a file outside
+    # ai-review/, for example a trusted script that a later step runs.
+    if [ -L "$f" ]; then
+      echo "::error::$f is a symlink; refusing to mask or upload it"
+      exit 1
+    fi
     [ -e "$f" ] || { echo "Nothing to mask at $f"; continue; }
-    if mask "$f" "$f.masked" && mv "$f.masked" "$f"; then
+    # The temp file lives outside the workspace, so no entry the PR or the agent
+    # placed next to $f can redirect the write. mv replaces the entry for $f.
+    tmp="$(mktemp "${RUNNER_TEMP:-/tmp}/ai-review-mask.XXXXXX")" || {
+      echo "::error::Cannot create a temp file to mask $f; refusing to continue"
+      exit 1
+    }
+    if mask "$f" "$tmp" && mv -f "$tmp" "$f"; then
       echo "Masked $f"
     else
-      rm -f "$f.masked"
+      rm -f "$tmp"
       echo "::error::Masking pass failed for $f; refusing to continue"
       exit 1
     fi
