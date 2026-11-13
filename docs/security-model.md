@@ -74,12 +74,12 @@ flowchart LR
    unwraps the token first, the review fails instead of running. Before the unwrap, a
    step fails the `review` job if it has OIDC access, so a later edit that grants
    `id-token: write` there cannot slip through.
-9. **The agent has only the tools the prompt needs.** Bash is limited to `gh pr view`,
-   `gh pr diff`, `git diff`, `git log` and `git show`. So `git -c alias…`, `gh alias set
-   --shell` and `gh api --hostname` are not available. Git flags that write files
-   (`--output`), read files outside the repository (`--no-index`) or run commands
-   (`--ext-diff`, `--textconv`) are denied explicitly, and git ignores system and user
-   config. The agent can write files only below `ai-review/`, and `Read` cannot read
+9. **The agent has only the tools the prompt needs.** Bash is limited to `gh pr view`
+   and `gh pr diff`. The agent has no git command, so git aliases and git flags that
+   write files (`--output`), read files outside the repository (`--no-index`) or run
+   commands (`--ext-diff`, `--textconv`) are not available. Neither are `gh alias set
+   --shell` and `gh api --hostname`. As an extra guard, git ignores system and user
+   config in the agent step. The agent can write files only below `ai-review/`, and `Read` cannot read
    `/proc` (where the process environment, and so the key, is). Prefix rules are not a
    sandbox, so guarantees 2–4 do not depend on them.
 10. **Agent output is masked before it leaves the review job.** The transcript,
@@ -127,7 +127,7 @@ the team's Vault role and OIDC access out of reach in any case.
   that runs code could send data there with credentials of its own. Guarantee 9 is what
   stops the agent from running code.
 - **Runner compromise.** The tool rules (guarantee 9) are **not a sandbox**: a bug in
-  Claude Code's rule matching or a new git or gh feature could still let the agent run
+  Claude Code's rule matching or a new `gh` feature could still let the agent run
   commands, and hosted runners give passwordless sudo (on private repositories). A
   successfully injected agent should be treated as
   owning the review VM. That exposes what the review job already holds: the Anthropic

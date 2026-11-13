@@ -449,8 +449,9 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
         env:
-          # Keep git away from system/user config (aliases, external diff and
-          # textconv drivers). claude-code-action only writes the repo config.
+          # The agent has no git tool. As an extra guard, keep any git process
+          # away from system/user config (aliases, external diff and textconv
+          # drivers). claude-code-action only writes the repo config.
           GIT_CONFIG_NOSYSTEM: "1"
           GIT_CONFIG_GLOBAL: /dev/null
           # No telemetry or auto-update traffic, so the egress allowlist stays short.
@@ -462,17 +463,18 @@ jobs:
           # Named bots only (never `*`): lets e.g. a PR opened by Claude itself
           # be reviewed on its `opened` event.
           allowed_bots: ${{ needs.config.outputs.allowed_bots }}
-          # Only the commands the prompt needs. No `git -c`/`gh alias` (run
-          # arbitrary commands), no `gh api` (can target another host), and file
-          # writes only below ai-review/ (Edit rules cover the Write tool; a
-          # `Write(path)` rule is ignored). Prefix rules are not a sandbox, so
-          # git flags that write files, read files outside the repo or run
-          # commands are denied explicitly, and Read cannot reach /proc (the
-          # key is in /proc/self/environ). The design still treats everything
-          # produced on this runner as untrusted (docs/security-model.md).
+          # Only the commands the prompt needs: `gh pr view` and `gh pr diff`.
+          # No git (aliases, `--output`, `--no-index`, external diff and
+          # textconv drivers can write files, read files or run commands), no
+          # `gh alias` (runs commands), no `gh api` (can target another host),
+          # and file writes only below ai-review/ (Edit rules cover the Write
+          # tool; a `Write(path)` rule is ignored). Read cannot reach /proc (the
+          # key is in /proc/self/environ). Prefix rules are not a sandbox: the
+          # design still treats everything produced on this runner as
+          # untrusted (docs/security-model.md).
           claude_args: >-
-            --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Read,Grep,Glob,Edit(ai-review/**)"
-            --disallowedTools "Read(//proc/**),Bash(git * --output*),Bash(git * --no-index*),Bash(git * --ext-diff*),Bash(git * --textconv*)"${{ needs.config.outputs.model != '' && format(' --model {0}', needs.config.outputs.model) || '' }}
+            --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Read,Grep,Glob,Edit(ai-review/**)"
+            --disallowedTools "Read(//proc/**)"${{ needs.config.outputs.model != '' && format(' --model {0}', needs.config.outputs.model) || '' }}
 
       # The agent could write files (only below ai-review/, unless it escaped
       # its tool rules), so files it could reach are not trusted after this
