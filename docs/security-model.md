@@ -85,7 +85,10 @@ flowchart LR
 10. **Agent output is masked before it leaves the review job.** The transcript,
     `verdict.json` and `dedup.json` are masked (literal secret values and common token
     shapes) in the review job, the only job that holds the key. `decide` posts text from
-    `verdict.json` and `dedup.json` on the PR. If masking fails, nothing is uploaded.
+    `verdict.json` and `dedup.json` on the PR. If masking fails, or if either file is a
+    symlink, a directory or another non-regular file, nothing is uploaded. The review
+    job starts with an empty `ai-review/` directory, so the PR cannot place entries
+    there.
 11. **On public repositories, the review job can reach only an allowlist of hosts.**
     `step-security/harden-runner` blocks all other egress from the agent step onwards
     and disables `sudo`, so the firewall cannot be removed. The review job runs on

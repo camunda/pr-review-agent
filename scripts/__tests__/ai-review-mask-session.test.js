@@ -228,3 +228,12 @@ test('in-place mode ignores a planted <file>.masked symlink', () => {
   assert.ok(!fs.lstatSync(verdict).isSymbolicLink(), 'verdict.json stays a regular file');
   assert.ok(!fs.readFileSync(verdict, 'utf8').includes(ANTHROPIC_API_KEY));
 });
+
+test('in-place mode refuses a directory, which would be uploaded unmasked', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-review-mask-'));
+  const dedup = path.join(dir, 'dedup.json');
+  fs.mkdirSync(dedup);
+  fs.writeFileSync(path.join(dedup, 'leak.json'), JSON.stringify({ k: ANTHROPIC_API_KEY }));
+  assert.throws(() => runInPlace([dedup]), 'a directory input must fail the step');
+  assert.deepStrictEqual(fs.readdirSync(dedup), ['leak.json'], 'nothing is moved into the directory');
+});

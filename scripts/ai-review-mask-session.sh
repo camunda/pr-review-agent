@@ -10,9 +10,9 @@
 #     output) it removes the output file and exits 0: capture is reported by a
 #     separate step and must never fail the read-only review.
 #   - FILE...: masks each file IN PLACE (verdict.json, dedup.json). A missing
-#     file is skipped. Fail closed: on a masking failure the file is left
-#     untouched and the script exits non-zero, so the step fails and the
-#     unmasked file is never uploaded.
+#     file is skipped. Fail closed: a symlink, a directory or any other
+#     non-regular file, or a masking failure, makes the script exit non-zero,
+#     so the step fails and nothing unmasked is uploaded.
 #
 # Scope: this seals ACCIDENTAL leakage (a secret the agent incidentally read
 # into its output). It is NOT a defense against a prompt-injected agent that
@@ -61,6 +61,11 @@ if [ "$#" -gt 0 ]; then
       exit 1
     fi
     [ -e "$f" ] || { echo "Nothing to mask at $f"; continue; }
+    # A directory would be uploaded recursively, with unmasked files inside.
+    if [ ! -f "$f" ]; then
+      echo "::error::$f is not a regular file; refusing to mask or upload it"
+      exit 1
+    fi
     # The temp file lives outside the workspace, so no entry the PR or the agent
     # placed next to $f can redirect the write. mv replaces the entry for $f.
     tmp="$(mktemp "${RUNNER_TEMP:-/tmp}/ai-review-mask.XXXXXX")" || {

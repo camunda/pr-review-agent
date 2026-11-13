@@ -507,7 +507,7 @@ jobs:
           set -uo pipefail
           # Drop any dedup.json the Write-capable agent may have planted, so a
           # failure before the trusted script writes its own result fails open.
-          rm -f ai-review/dedup.json
+          rm -rf ai-review/dedup.json
           bash .trusted-agent/scripts/ai-review-dedup-findings.sh
 
       - name: Verify the agent produced a verdict
