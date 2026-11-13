@@ -92,8 +92,10 @@ flowchart LR
     job starts with an empty `ai-review/` directory, so the PR cannot place entries
     there.
 11. **On public repositories, the review job can reach only an allowlist of hosts.**
-    `step-security/harden-runner` blocks all other egress from the agent step onwards
-    and disables `sudo`, so the firewall cannot be removed. The review job runs on
+    `step-security/harden-runner` blocks all other egress for the whole job (it starts
+    at job start) and disables `sudo`, so the firewall cannot be removed. The list
+    includes Camunda Vault, which the job needs only to unwrap the key; the job holds
+    no Vault credential (guarantee 8). The review job runs on
     `ubuntu-latest`, because harden-runner does not work on `ubuntu-slim` or self-hosted
     runners. Private repositories are not filtered: harden-runner needs a paid plan there.
 
@@ -124,9 +126,9 @@ the team's Vault role and OIDC access out of reach in any case.
   into `verdict.json`, which `decide` then posts on the PR — publicly, on a public
   repository. The egress allowlist covers outbound traffic, not text posted on the PR.
   Mitigation: one Anthropic key per team, with a spend cap, that the team can rotate.
-- **The egress allowlist includes GitHub and Azure blob storage** (`github.com`,
-  `api.github.com`, `*.blob.core.windows.net`), because the job needs them. An agent
-  that runs code could send data there with credentials of its own. Guarantee 9 is what
+- **The egress allowlist includes GitHub, Azure blob storage and Camunda Vault** (`github.com`,
+  `api.github.com`, `*.blob.core.windows.net`, `vault.int.camunda.com`), because the job
+  needs them. An agent that runs code could send data there with credentials of its own. Guarantee 9 is what
   stops the agent from running code.
 - **Runner compromise.** The tool rules (guarantee 9) are **not a sandbox**: a bug in
   Claude Code's rule matching or a new `gh` feature could still let the agent run

@@ -337,8 +337,40 @@ jobs:
     env:
       SHADOW_MODE: ${{ needs.config.outputs.shadow_mode }}
     steps:
-      # First, so the always() transcript steps get a path even when a later
-      # step (the OIDC check, the unwrap) fails the job early.
+      # Public repositories: anyone can comment, so prompt injection is
+      # realistic. The job can only reach the hosts below, so an injected
+      # agent cannot send the key elsewhere. harden-runner turns the firewall
+      # on in its `pre` step at job start, wherever this step stands, so the
+      # list covers the whole job: the Vault unwrap, the checkouts and the
+      # artifact steps too. It is first so the order matches what happens.
+      # sudo is disabled so the firewall cannot be removed. Private repos:
+      # harden-runner needs a paid plan there, and the risk is lower (only org
+      # members comment).
+      - name: Restrict network egress (public repositories)
+        if: ${{ !github.event.repository.private }}
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        with:
+          egress-policy: ${{ inputs.egress_policy }}
+          disable-sudo-and-containers: true
+          # Camunda Vault (unwrap only: this job holds no Vault credential);
+          # Claude API; GitHub API (gh, dedup); Bun download (github.com and its
+          # release redirects); Bun dependencies of claude-code-action; Claude
+          # Code installer; artifact upload/download.
+          allowed-endpoints: >-
+            vault.int.camunda.com:443
+            api.anthropic.com:443
+            api.github.com:443
+            github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            registry.npmjs.org:443
+            claude.ai:443
+            downloads.claude.ai:443
+            results-receiver.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+
+      # Before the unwrap, so the always() transcript steps get a path even
+      # when a later step (the OIDC check, the unwrap) fails the job early.
       - name: Resolve session transcript path
         run: echo "SESSION_MASKED_FILE=${RUNNER_TEMP}/ai-review-session-masked.json" >> "$GITHUB_ENV"
 
@@ -414,34 +446,6 @@ jobs:
           CONFIG_FILE: .pr-review-agent/config.json
           AGENT_DIR: .pr-review-agent
         run: bash .pr-review-agent/scripts/render-prompt.sh
-
-      # Public repositories: anyone can comment, so prompt injection is
-      # realistic. From here on the job can only reach the hosts below, so an
-      # injected agent cannot send the key elsewhere. It starts after the
-      # unwrap and the checkouts, so Vault and those hosts need no entry. sudo
-      # is disabled so the firewall cannot be removed. Private repos:
-      # harden-runner needs a paid plan there, and the risk is lower (only org
-      # members comment).
-      - name: Restrict network egress (public repositories)
-        if: ${{ !github.event.repository.private }}
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
-        with:
-          egress-policy: ${{ inputs.egress_policy }}
-          disable-sudo-and-containers: true
-          # Claude API; GitHub API (gh, dedup); Bun download (github.com and its
-          # release redirects); Bun dependencies of claude-code-action; Claude
-          # Code installer; artifact upload/download.
-          allowed-endpoints: >-
-            api.anthropic.com:443
-            api.github.com:443
-            github.com:443
-            objects.githubusercontent.com:443
-            release-assets.githubusercontent.com:443
-            registry.npmjs.org:443
-            claude.ai:443
-            downloads.claude.ai:443
-            results-receiver.actions.githubusercontent.com:443
-            *.blob.core.windows.net:443
 
       # anthropics/claude-code-action is a third-party action — the official
       # action for running Claude Code agents in CI. Pinned to a commit SHA.
