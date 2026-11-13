@@ -10,8 +10,9 @@
 #     output) it removes the output file and exits 0: capture is reported by a
 #     separate step and must never fail the read-only review.
 #   - FILE...: masks each file IN PLACE (verdict.json, dedup.json). A missing
-#     file is skipped. Fail closed: a symlink, a directory or any other
-#     non-regular file, or a masking failure, makes the script exit non-zero,
+#     file is skipped. Each file must hold exactly one JSON value. Fail closed:
+#     a symlink, a directory or any other non-regular file, content that is
+#     not one JSON value, or a masking failure makes the script exit non-zero,
 #     so the step fails and nothing unmasked is uploaded.
 #
 # Scope: this seals ACCIDENTAL leakage (a secret the agent incidentally read
@@ -60,14 +61,15 @@ mask() {
   perl -0777 -ne "$REDACT"' print redact($_);' "$1" > "$2"
 }
 
-# mask_json SRC DST — like mask, but when SRC is valid JSON, decode it first
-# and mask every string and key. Otherwise a `\uXXXX`-escaped secret would get
-# through, and `decide` (`jq -r`) would decode it into the posted review. Not
-# valid JSON: plain-text masking; `jq` in `decide` cannot decode that file.
+# mask_json SRC DST — decode SRC as ONE JSON value, mask every string and
+# key, and encode it again. Plain-text masking would let a `\uXXXX`-escaped
+# secret through, and `decide` (`jq -r`) would decode it into the posted review.
+# Fails (exit 1) when SRC is not exactly one JSON value: `jq` also reads JSON
+# streams such as `{...} {}`, so no plain-text fallback is safe.
 mask_json() {
   perl -MJSON::PP -0777 -ne "$REDACT"'
     my $data = eval { JSON::PP->new->utf8->allow_nonref->decode($_) };
-    if ($@) { print redact($_); exit 0 }
+    if ($@) { print STDERR "not a single JSON value: $@"; exit 1 }
     sub walk {
       my ($v) = @_;
       return $v if JSON::PP::is_bool($v);

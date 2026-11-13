@@ -221,7 +221,7 @@ test('in-place mode ignores a planted <file>.masked symlink', () => {
   const trusted = path.join(dir, 'trusted.sh');
   fs.writeFileSync(trusted, 'echo ORIGINAL\n');
   const verdict = path.join(dir, 'verdict.json');
-  fs.writeFileSync(verdict, `echo PWNED ${ANTHROPIC_API_KEY}\n`);
+  fs.writeFileSync(verdict, JSON.stringify({ reason: `echo PWNED ${ANTHROPIC_API_KEY}` }));
   fs.symlinkSync(trusted, `${verdict}.masked`);
   runInPlace([verdict]);
   assert.strictEqual(fs.readFileSync(trusted, 'utf8'), 'echo ORIGINAL\n', 'the trusted script is untouched');
@@ -262,10 +262,17 @@ test('in-place mode masks a key hidden with JSON \\u escapes', () => {
   );
 });
 
-test('in-place mode still masks a file that is not valid JSON', () => {
+test('in-place mode fails closed on a file that is not valid JSON', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-review-mask-'));
   const verdict = path.join(dir, 'verdict.json');
   fs.writeFileSync(verdict, `not json ${ANTHROPIC_API_KEY}`);
-  runInPlace([verdict]);
-  assert.ok(!fs.readFileSync(verdict, 'utf8').includes(ANTHROPIC_API_KEY));
+  assert.throws(() => runInPlace([verdict]), 'the step must fail so the file is not uploaded');
+});
+
+test('in-place mode fails closed on a JSON stream that jq would still decode', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-review-mask-'));
+  const verdict = path.join(dir, 'verdict.json');
+  // `jq -r .reason` reads both values and decodes the escaped key of the first.
+  fs.writeFileSync(verdict, '{"verdict":"NEEDS_HUMAN","reason":"\\u0073k-ant-api03-EXAMPLEsecretVALUE0123456789abcdef"} {}');
+  assert.throws(() => runInPlace([verdict]), 'a JSON stream must fail the step');
 });

@@ -86,7 +86,9 @@ flowchart LR
     `verdict.json` and `dedup.json` are masked (literal secret values and common token
     shapes) in the review job, the only job that holds the key. `decide` posts text from
     `verdict.json` and `dedup.json` on the PR. If masking fails, or if either file is a
-    symlink, a directory or another non-regular file, nothing is uploaded. The review
+    symlink, a directory or another non-regular file, or is not exactly one JSON value,
+    nothing is uploaded. Masking works on the decoded JSON, so `\uXXXX` escapes do not
+    hide a secret. The review
     job starts with an empty `ai-review/` directory, so the PR cannot place entries
     there.
 11. **On public repositories, the review job can reach only an allowlist of hosts.**
