@@ -31,10 +31,21 @@ on:
         type: boolean
         default: false
       runs_on:
-        description: Runner label for all jobs.
+        description: >-
+          Runner label for all jobs. On a public repository the review job
+          always runs on `ubuntu-latest`, because the egress firewall
+          (harden-runner) does not work on `ubuntu-slim` or self-hosted runners.
         required: false
         type: string
         default: ubuntu-slim
+      egress_policy:
+        description: >-
+          Network egress policy of the review job on a public repository:
+          `block` (only the allowlisted hosts) or `audit` (log only, to find
+          missing hosts). Private repositories are not filtered.
+        required: false
+        type: string
+        default: block
       agent_repo_token_vault_secret:
         description: >-
           Optional Vault secret "<path> <field>" holding a token with
@@ -314,7 +325,8 @@ jobs:
     name: AI review (read-only)
     needs: config
     if: needs.config.outputs.run == 'true'
-    runs-on: ${{ inputs.runs_on }}
+    # harden-runner needs a GitHub-hosted VM (not ubuntu-slim, not self-hosted).
+    runs-on: ${{ github.event.repository.private && inputs.runs_on || 'ubuntu-latest' }}
     timeout-minutes: ${{ fromJSON(needs.config.outputs.timeout_minutes) }}
     permissions:
       contents: read
@@ -401,11 +413,46 @@ jobs:
           AGENT_DIR: .pr-review-agent
         run: bash .pr-review-agent/scripts/render-prompt.sh
 
+      # Public repositories: anyone can comment, so prompt injection is
+      # realistic. From here on the job can only reach the hosts below, so an
+      # injected agent cannot send the key elsewhere. It starts after the
+      # unwrap and the checkouts, so Vault and those hosts need no entry. sudo
+      # is disabled so the firewall cannot be removed. Private repos:
+      # harden-runner needs a paid plan there, and the risk is lower (only org
+      # members comment).
+      - name: Restrict network egress (public repositories)
+        if: ${{ !github.event.repository.private }}
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        with:
+          egress-policy: ${{ inputs.egress_policy }}
+          disable-sudo-and-containers: true
+          # Claude API; GitHub API (gh, dedup); Bun download (github.com and its
+          # release redirects); Bun dependencies of claude-code-action; Claude
+          # Code installer; artifact upload/download.
+          allowed-endpoints: >-
+            api.anthropic.com:443
+            api.github.com:443
+            github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            registry.npmjs.org:443
+            claude.ai:443
+            downloads.claude.ai:443
+            results-receiver.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+
       # anthropics/claude-code-action is a third-party action — the official
       # action for running Claude Code agents in CI. Pinned to a commit SHA.
       - name: Run Claude review agent (read-only, produces a verdict file)
         id: claude
         uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
+        env:
+          # Keep git away from system/user config (aliases, external diff and
+          # textconv drivers). claude-code-action only writes the repo config.
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_CONFIG_GLOBAL: /dev/null
+          # No telemetry or auto-update traffic, so the egress allowlist stays short.
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
         with:
           anthropic_api_key: ${{ fromJSON(steps.unwrap.outputs.secrets || '{}').ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -413,15 +460,21 @@ jobs:
           # Named bots only (never `*`): lets e.g. a PR opened by Claude itself
           # be reviewed on its `opened` event.
           allowed_bots: ${{ needs.config.outputs.allowed_bots }}
-          # Bash is limited to gh/git to keep the agent on task. This is NOT a
-          # sandbox (git/gh aliases can run commands): the safety of the design
-          # rests on the read-only token here and on `decide` treating everything
+          # Only the commands the prompt needs. No `git -c`/`gh alias` (run
+          # arbitrary commands), no `gh api` (can target another host), and file
+          # writes only below ai-review/ (Edit rules cover the Write tool; a
+          # `Write(path)` rule is ignored). Prefix rules are not a sandbox, so
+          # git flags that write files, read files outside the repo or run
+          # commands are denied explicitly, and Read cannot reach /proc (the
+          # key is in /proc/self/environ). The design still treats everything
           # produced on this runner as untrusted (docs/security-model.md).
           claude_args: >-
-            --allowedTools "Bash(gh:*),Bash(git:*),Read,Grep,Glob,Write"${{ needs.config.outputs.model != '' && format(' --model {0}', needs.config.outputs.model) || '' }}
+            --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Read,Grep,Glob,Edit(ai-review/**)"
+            --disallowedTools "Read(//proc/**),Bash(git * --output*),Bash(git * --no-index*),Bash(git * --ext-diff*),Bash(git * --textconv*)"${{ needs.config.outputs.model != '' && format(' --model {0}', needs.config.outputs.model) || '' }}
 
-      # The agent had Write and Bash(git:*), so files it could reach are not
-      # trusted after this point. Later steps that hold the Anthropic key run
+      # The agent could write files (only below ai-review/, unless it escaped
+      # its tool rules), so files it could reach are not trusted after this
+      # point. Later steps that hold the Anthropic key run
       # scripts from a FRESH download of the immutable bundle, never from
       # .pr-review-agent or the PR checkout. This stops file
       # tampering via Write; it does not undo a full runner compromise (see
@@ -457,6 +510,15 @@ jobs:
 
       - name: Verify the agent produced a verdict
         run: test -f ai-review/verdict.json
+
+      # `decide` posts this text on the PR (publicly, on a public repo). Fail
+      # closed: if masking fails, nothing is uploaded and nothing is posted.
+      - name: Mask secrets from verdict and dedup files
+        env:
+          # Passed via env (read from %ENV), never on argv.
+          ANTHROPIC_API_KEY: ${{ fromJSON(steps.unwrap.outputs.secrets || '{}').ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash .trusted-agent/scripts/ai-review-mask-session.sh ai-review/verdict.json ai-review/dedup.json
 
       - name: Upload verdict artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

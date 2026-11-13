@@ -42,7 +42,8 @@ flowchart LR
    a GitHub token beyond its read-only `GITHUB_TOKEN`. Steps after the agent that hold
    the Anthropic key (dedup, transcript masking) run scripts from a fresh download of
    that artifact. They never run from the PR checkout or the first
-   copy of pr-review-agent, which the agent could have changed with `Write`. Their
+   copy of pr-review-agent, which the agent could have changed if it escaped its tool
+   rules (guarantee 9). Their
    outputs are still treated as untrusted (see *Runner compromise* below).
 5. **Agent text cannot ping or spoof.** `@` mentions in agent text are broken with a
    zero-width space. Counterfeit `<!--` calibration markers are neutralised. The
@@ -73,6 +74,36 @@ flowchart LR
    unwraps the token first, the review fails instead of running. Before the unwrap, a
    step fails the `review` job if it has OIDC access, so a later edit that grants
    `id-token: write` there cannot slip through.
+9. **The agent has only the tools the prompt needs.** Bash is limited to `gh pr view`,
+   `gh pr diff`, `git diff`, `git log` and `git show`. So `git -c alias…`, `gh alias set
+   --shell` and `gh api --hostname` are not available. Git flags that write files
+   (`--output`), read files outside the repository (`--no-index`) or run commands
+   (`--ext-diff`, `--textconv`) are denied explicitly, and git ignores system and user
+   config. The agent can write files only below `ai-review/`, and `Read` cannot read
+   `/proc` (where the process environment, and so the key, is). Prefix rules are not a
+   sandbox, so guarantees 2–4 do not depend on them.
+10. **Agent output is masked before it leaves the review job.** The transcript,
+    `verdict.json` and `dedup.json` are masked (literal secret values and common token
+    shapes) in the review job, the only job that holds the key. `decide` posts text from
+    `verdict.json` and `dedup.json` on the PR. If masking fails, nothing is uploaded.
+11. **On public repositories, the review job can reach only an allowlist of hosts.**
+    `step-security/harden-runner` blocks all other egress from the agent step onwards
+    and disables `sudo`, so the firewall cannot be removed. The review job runs on
+    `ubuntu-latest`, because harden-runner does not work on `ubuntu-slim` or self-hosted
+    runners. Private repositories are not filtered: harden-runner needs a paid plan there.
+
+## Public repositories
+
+On a public repository anyone can comment on a PR, and the agent reads PR content and
+comments. Assume that a prompt injection reaches the agent. Fork PRs are skipped, which
+limits who can open a reviewed PR, but not who can write text that the agent reads.
+Shadow mode does not reduce this risk: the leak needs no approval.
+
+The goal of an injected agent is the Anthropic key. Guarantee 9 removes the known ways
+to run commands or to write files outside `ai-review/`. Guarantee 11 stops the key from
+being sent to an outside host if the agent still finds a way to run code. Guarantee 10
+stops a literal key in the agent's text from being posted on the PR. Guarantee 8 keeps
+the team's Vault role and OIDC access out of reach in any case.
 
 ## Residual risks
 
@@ -83,9 +114,19 @@ flowchart LR
 - **Secrets in the transcript.** The masked transcript is uploaded as an artifact.
   Masking removes known secret values and common token shapes. It does not stop a
   hijacked agent from encoding a secret it read, for example as base64.
-- **Runner compromise.** `Bash(gh:*)` / `Bash(git:*)` keep the agent on task, but they
-  are **not a sandbox**: git and gh aliases can run arbitrary commands, and hosted
-  runners give passwordless sudo. A successfully injected agent should be treated as
+- **Encoded secrets in posted text.** Masking finds literal values and known token
+  shapes. It does **not** find a secret that a hijacked agent encodes (base64, hex, …)
+  into `verdict.json`, which `decide` then posts on the PR — publicly, on a public
+  repository. The egress allowlist covers outbound traffic, not text posted on the PR.
+  Mitigation: one Anthropic key per team, with a spend cap, that the team can rotate.
+- **The egress allowlist includes GitHub and Azure blob storage** (`github.com`,
+  `api.github.com`, `*.blob.core.windows.net`), because the job needs them. An agent
+  that runs code could send data there with credentials of its own. Guarantee 9 is what
+  stops the agent from running code.
+- **Runner compromise.** The tool rules (guarantee 9) are **not a sandbox**: a bug in
+  Claude Code's rule matching or a new git or gh feature could still let the agent run
+  commands, and hosted runners give passwordless sudo (on private repositories). A
+  successfully injected agent should be treated as
   owning the review VM. That exposes what the review job already holds: the Anthropic
   key, which the agent process has anyway, and a read-only `GITHUB_TOKEN`. No broader
   token is present, and no Vault credential or OIDC access (guarantee 8). It can also

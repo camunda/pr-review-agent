@@ -1,6 +1,7 @@
 // Tests for ai-review-mask-session.sh: the security-critical masking pass that
-// redacts secrets out of a COPY of the AI review agent's session transcript
-// before it is uploaded as an artifact. A masking rule that silently stops
+// redacts secrets out of the AI review agent's output (a copy of the session
+// transcript, and verdict.json / dedup.json in place) before it is uploaded as
+// an artifact. A masking rule that silently stops
 // matching is a leaked secret, so these are regression coverage for the seal.
 //
 // The script is executed as a subprocess in a temp dir so the test exercises
@@ -141,4 +142,65 @@ test('a masking failure leaves no half-masked output behind', () => {
   }).toString();
   assert.ok(!fs.existsSync(out), 'no half-masked artifact should remain after a failure');
   assert.match(stdout, /Masking pass failed/, 'warns that the masking pass failed');
+});
+
+// In-place mode: the review job masks verdict.json and dedup.json before the
+// `ai-review-verdict` upload, because `decide` posts their text on the PR.
+
+/** Run the script in in-place mode on the given files. */
+function runInPlace(files) {
+  return execFileSync('bash', [SCRIPT, ...files], {
+    env: { ...process.env, ANTHROPIC_API_KEY, GITHUB_TOKEN },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).toString();
+}
+
+test('verdict.json and dedup.json are masked in place and stay valid JSON', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-review-mask-'));
+  const verdict = path.join(dir, 'verdict.json');
+  const dedup = path.join(dir, 'dedup.json');
+  fs.writeFileSync(
+    verdict,
+    JSON.stringify({
+      verdict: 'NEEDS_HUMAN',
+      summary: `Leaked: ${ANTHROPIC_API_KEY}`,
+      findings: [{ path: 'a.js', line: 1, body: `token ${GITHUB_TOKEN} and ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789` }],
+    }),
+  );
+  fs.writeFileSync(dedup, JSON.stringify({ dropped: [{ reason: `see ${ANTHROPIC_API_KEY}` }] }));
+
+  runInPlace([verdict, dedup]);
+
+  for (const f of [verdict, dedup]) {
+    const text = fs.readFileSync(f, 'utf8');
+    assert.ok(!text.includes(ANTHROPIC_API_KEY), `${path.basename(f)}: ANTHROPIC_API_KEY must be gone`);
+    assert.ok(!text.includes(GITHUB_TOKEN), `${path.basename(f)}: GITHUB_TOKEN must be gone`);
+    assert.ok(!text.includes('ghp_ABCDEFGHIJ'), `${path.basename(f)}: token shapes must be gone`);
+    assert.doesNotThrow(() => JSON.parse(text), `${path.basename(f)} must stay valid JSON`);
+  }
+  assert.strictEqual(JSON.parse(fs.readFileSync(verdict, 'utf8')).verdict, 'NEEDS_HUMAN', 'non-secret fields survive');
+  assert.ok(!fs.existsSync(`${verdict}.masked`), 'no temp file left behind');
+});
+
+test('in-place mode skips a missing file (dedup.json is optional)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-review-mask-'));
+  const verdict = path.join(dir, 'verdict.json');
+  fs.writeFileSync(verdict, JSON.stringify({ summary: ANTHROPIC_API_KEY }));
+  const stdout = runInPlace([verdict, path.join(dir, 'dedup.json')]);
+  assert.ok(!fs.readFileSync(verdict, 'utf8').includes(ANTHROPIC_API_KEY));
+  assert.match(stdout, /Nothing to mask at .*dedup\.json/);
+});
+
+test('in-place mode fails closed when masking fails', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-review-mask-'));
+  const verdict = path.join(dir, 'verdict.json');
+  fs.writeFileSync(verdict, JSON.stringify({ summary: ANTHROPIC_API_KEY }));
+  // A read-only directory makes the temp-file redirection fail.
+  fs.chmodSync(dir, 0o500);
+  try {
+    assert.throws(() => runInPlace([verdict]), 'the step must fail so the file is not uploaded');
+  } finally {
+    fs.chmodSync(dir, 0o700);
+  }
+  assert.ok(!fs.existsSync(`${verdict}.masked`), 'no half-masked temp file remains');
 });
