@@ -121,6 +121,12 @@ the team's Vault role and OIDC access out of reach in any case.
 - **Secrets in the transcript.** The masked transcript is uploaded as an artifact.
   Masking removes known secret values and common token shapes. It does not stop a
   hijacked agent from encoding a secret it read, for example as base64.
+- **The wrapping token is in the run log.** It is not masked (masked values do not cross
+  jobs), so the `review` job log shows it, which on a public repository anyone can read.
+  It is single-use: a normal run redeems it right after the log line, and if someone
+  else redeems it first, the unwrap fails and the review does not run. If the unwrap
+  fails for another reason (for example a Vault outage), the logged token stays usable
+  until its 5-minute TTL ends, and whoever redeems it gets the Anthropic key.
 - **Encoded secrets in posted text.** Masking finds literal values and known token
   shapes. It does **not** find a secret that a hijacked agent encodes (base64, hex, …)
   into `verdict.json`, which `decide` then posts on the PR — publicly, on a public
