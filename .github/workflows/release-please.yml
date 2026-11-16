@@ -1,0 +1,34 @@
+name: release-please
+
+# Keeps one release PR open and updates it after each merge to main.
+# Merging the release PR creates the vX.Y.Z tag and the GitHub release.
+# See "Releasing" in README.md and the conventions in AGENTS.md.
+#
+# The release PR is opened with GITHUB_TOKEN, so other workflows (CI, PR-title
+# lint) do not run on it. It only changes CHANGELOG.md, version.txt and the
+# manifest.
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release PR and release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # tags, releases, release branch
+      pull-requests: write # open and update the release PR
+      issues: write # create the "autorelease" labels
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

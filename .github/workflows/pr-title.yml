@@ -1,0 +1,32 @@
+name: pr-title
+
+# The squash commit takes the PR title, and release-please reads that commit to
+# pick the next version. This check keeps the title in Conventional Commits form.
+# It is not a required check. See AGENTS.md for the allowed types.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  conventional-title:
+    name: Conventional PR title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@2252a14e810aa9b85c2d560bd7070c802206ecf6 # v6.1.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            refactor
+            docs
+            test
+            ci
+            chore

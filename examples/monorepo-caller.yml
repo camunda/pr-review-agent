@@ -45,7 +45,7 @@ jobs:
       checks: read
       statuses: read
       id-token: write
-    uses: camunda/pr-review-agent/.github/workflows/pr-review.yml@v1
+    uses: camunda/pr-review-agent/.github/workflows/pr-review.yml@<commit-sha> # vX.Y.Z
     with:
       config: frontend
       vault_auth_method: jwt

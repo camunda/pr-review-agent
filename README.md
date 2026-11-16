@@ -31,7 +31,7 @@ summary. When the team enables live mode, that job can also approve the PR.
      review:
        if: github.event.action != 'labeled' || github.event.label.name == 'ai-review'
        permissions: { contents: read, pull-requests: write, checks: read, statuses: read, id-token: write }
-       uses: camunda/pr-review-agent/.github/workflows/pr-review.yml@v1
+       uses: camunda/pr-review-agent/.github/workflows/pr-review.yml@<commit-sha> # vX.Y.Z
        with:
          config: <name>
          vault_auth_method: jwt
@@ -83,10 +83,24 @@ npm run lint # shellcheck + actionlint
 
 ## Releasing
 
-Callers pin a tag. After merging to `main`, create `vX.Y.Z` and move the major tag:
+Releases are automated with [release-please](https://github.com/googleapis/release-please).
+The conventions for commits, PR titles and breaking changes are in [`AGENTS.md`](AGENTS.md).
 
-```bash
-git tag vX.Y.Z && git tag -f v1 && git push origin vX.Y.Z && git push -f origin v1
+1. PRs are squash-merged. The PR title must be a Conventional Commit: `fix:` → patch,
+   `feat:` → minor, `!` → major. `refactor`, `docs`, `test`, `ci` and `chore` do not
+   create a release.
+2. After each merge to `main`, release-please updates one open release PR with the next
+   version and the `CHANGELOG.md` entry.
+3. A maintainer merges the release PR when a release is wanted. release-please then creates
+   the tag `vX.Y.Z` and a GitHub release. A major release has a **⚠ BREAKING CHANGES**
+   section with the migration notes from the PR descriptions.
+
+There is no floating major tag. Callers pin the commit SHA of a release tag and keep the
+version as a comment, so Renovate can tell major, minor and patch updates apart:
+
+```yaml
+uses: camunda/pr-review-agent/.github/workflows/pr-review.yml@<commit-sha> # vX.Y.Z
 ```
 
-Config changes reach callers on `@v1` only after `v1` is moved.
+We recommend [`infra-renovate-config`](https://github.com/camunda/infra-renovate-config) for
+callers. It does not auto-merge major updates.

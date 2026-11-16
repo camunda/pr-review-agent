@@ -4,7 +4,7 @@ Each team that uses pr-review-agent keeps **one config file in its own repositor
 `.github/pr-review-agent/<name>.yml`. The caller workflow names it:
 
 ```yaml
-uses: camunda/pr-review-agent/.github/workflows/pr-review.yml@v1
+uses: camunda/pr-review-agent/.github/workflows/pr-review.yml@<commit-sha> # vX.Y.Z
 with:
   config: <name>
 ```
@@ -224,7 +224,11 @@ so that commit is never reviewed. The label name in the caller must match
 
 ## Versioning
 
-Pin `uses:` to a release tag (`@v1`) or a full commit SHA. Scripts and prompt are
+Pin `uses:` to the commit SHA of a release tag and keep the version as a comment
+(`@<commit-sha> # vX.Y.Z`). Renovate reads the comment to classify updates, and a major
+version means that callers must change something: read the **⚠ BREAKING CHANGES**
+section of the [release](https://github.com/camunda/pr-review-agent/releases) first.
+See [Releasing](../README.md#releasing). Scripts and prompt are
 always taken from the same commit as the workflow (`job.workflow_sha`), so pinning the
 workflow pins them. The team config is independent of the pin: a change takes effect
 as soon as it is merged to your default branch.
