@@ -68,7 +68,7 @@ summary. When the team enables live mode, that job can also approve the PR.
 | `load-policy.sh` | review | Copies the rubric and skills into `.policy/` from this repo or the PR base commit |
 | `render-prompt.sh` | review | Fills in the prompt placeholders |
 | `ai-review-dedup-findings.sh` | review | LLM pass that drops findings already raised in earlier rounds (fail-open) |
-| `ai-review-mask-session.sh` | review | Removes secrets from the agent transcript before upload |
+| `ai-review-mask-session.sh` | review | Removes secrets from the agent transcript, verdict and dedup files before upload |
 | `gate.sh` | decide | Deterministic escalation from the changed-file list |
 | `ai-review-compute-verdict.sh` | decide | Combines the agent verdict, gate result and confidence floor, and builds the review payloads |
 | `ai-review-post-summary.sh` | decide | Posts a single COMMENT review (summary + inline comments, with a 422 fallback) |

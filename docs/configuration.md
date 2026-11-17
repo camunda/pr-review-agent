@@ -182,7 +182,8 @@ skills, because the workflow parses them.
 | --- | --- | --- |
 | `config` | (required) | Config name, i.e. `.github/pr-review-agent/<config>.yml` in the calling repo. |
 | `force_shadow_mode` | `false` | Force comment-only mode. It can never disable shadow mode. |
-| `runs_on` | `ubuntu-slim` | Runner label. The runner needs `jq`, `yq` (v4), `perl`, `gh`, `git`, `curl` and `openssl`. |
+| `runs_on` | `ubuntu-slim` | Runner label. The runner needs `jq`, `yq` (v4), `perl`, `gh`, `git`, `curl` and `openssl`. On a public repository the review job always runs on `ubuntu-latest` (needed for the egress firewall). |
+| `egress_policy` | `block` | Public repositories only: `block` limits the review job to an allowlist of hosts, `audit` only logs. Use `audit` to find a missing host, then go back to `block`. See [security model](security-model.md). |
 | `agent_repo_token_vault_secret` | `""` | `"<vault path> <field>"` for a token that can read this repo. Use it when the caller's `GITHUB_TOKEN` cannot check out pr-review-agent (the usual case for an internal repo). Only the `config` job imports it; the agent job never sees it. Prefer a token scoped to `contents: read` on pr-review-agent. |
 | `vault_auth_method` | `approle` | How the `config` job logs in to Vault: `jwt` (GitHub OIDC, recommended) or `approle`. Infrastructure is replacing AppRole with JWT (camunda/team-infrastructure#1076). |
 
