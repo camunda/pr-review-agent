@@ -7,7 +7,7 @@ name: release-please
 # The release PR is opened and updated with GITHUB_TOKEN. GitHub therefore
 # creates its CI runs in an approval-required state: before merging, a
 # maintainer clicks "Approve workflows to run" so the required checks pass.
-# The PR only changes CHANGELOG.md, version.txt and the manifest.
+# The PR only changes CHANGELOG.md and the manifest.
 
 on:
   push:
