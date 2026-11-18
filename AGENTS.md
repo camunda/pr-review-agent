@@ -66,10 +66,9 @@ When you are not sure whether a change is breaking, treat it as breaking.
   approves its CI runs and merges it to publish the tag `vX.Y.Z` and the GitHub release.
   The steps are in "How to publish a release" in `README.md`.
 - Do not create, move or delete tags by hand. There is no floating `v1` tag.
-- Do not edit `CHANGELOG.md`, `version.txt` or `.release-please-manifest.json` by hand.
+- Do not edit `CHANGELOG.md` or `.release-please-manifest.json` by hand.
   release-please owns them.
 - Do not merge the release PR unless a maintainer asks you to.
-- After `v1.0.0` exists, remove `release-as` from `release-please-config.json`.
 
 ## Pinning
 
