@@ -95,6 +95,29 @@ The conventions for commits, PR titles and breaking changes are in [`AGENTS.md`]
    the tag `vX.Y.Z` and a GitHub release. A major release has a **⚠ BREAKING CHANGES**
    section with the migration notes from the PR descriptions.
 
+`main` only accepts squash-merged PRs, and these checks are required: `Script tests`,
+`Lint`, `Conventional PR title` and `Breaking change marked consistently`. Releases are
+immutable: once published, a release and its tag cannot change.
+
+### How to publish a release
+
+1. Open the release PR. It is the open PR titled `chore(main): release X.Y.Z`
+   ([search](https://github.com/camunda/pr-review-agent/pulls?q=is%3Apr+is%3Aopen+%22chore%28main%29%3A+release%22)).
+   release-please creates and updates it; you never open it yourself.
+2. Read the version and the `CHANGELOG.md` diff. For a major version, check that the
+   **⚠ BREAKING CHANGES** section tells callers what to change. If a PR was merged with
+   the wrong type (for example `feat:` instead of `feat!:`), edit the description of that
+   merged PR and add a `BEGIN_COMMIT_OVERRIDE` … `END_COMMIT_OVERRIDE` block with the
+   corrected commit message. release-please uses it on its next run (see
+   [How can I fix release notes?](https://github.com/googleapis/release-please#how-can-i-fix-release-notes)).
+   Do not edit the release PR itself.
+3. Click **Approve workflows to run** on the release PR. GitHub does not start CI on its
+   own for PRs opened by `GITHUB_TOKEN`. Wait until the required checks pass.
+4. Squash-merge the release PR. release-please creates the tag and the GitHub release a
+   few seconds later (see the `release-please` workflow run on `main`).
+5. Check the [release page](https://github.com/camunda/pr-review-agent/releases). Callers
+   get a Renovate PR for the new version.
+
 There is no floating major tag. Callers pin the commit SHA of a release tag and keep the
 version as a comment, so Renovate can tell major, minor and patch updates apart:
 

@@ -63,7 +63,8 @@ When you are not sure whether a change is breaking, treat it as breaking.
 ## Releases
 
 - release-please keeps one release PR open (`chore(main): release X.Y.Z`). A maintainer
-  merges it to publish the tag `vX.Y.Z` and the GitHub release.
+  approves its CI runs and merges it to publish the tag `vX.Y.Z` and the GitHub release.
+  The steps are in "How to publish a release" in `README.md`.
 - Do not create, move or delete tags by hand. There is no floating `v1` tag.
 - Do not edit `CHANGELOG.md`, `version.txt` or `.release-please-manifest.json` by hand.
   release-please owns them.
