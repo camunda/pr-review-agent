@@ -51,6 +51,12 @@ For a breaking change:
 3. End the PR description with one paragraph that starts with `BREAKING CHANGE:` and
    tells callers what to change. Keep it as prose, and do not start a line in it with
    `word:`. release-please copies this paragraph into the release notes.
+4. Nothing may follow that paragraph. Put any attribution line (for example
+   "Generated with …") above it, or release-please ignores the footer.
+
+The "Breaking change marked consistently" check fails when the title has `!` but no
+footer, when a footer exists but the title has no `!`, or when the footer is not the
+last paragraph.
 
 When you are not sure whether a change is breaking, treat it as breaking.
 
