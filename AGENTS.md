@@ -23,6 +23,7 @@ Write the PR title (and every commit subject) as a
 | --- | --- | --- |
 | `fix` | A behaviour correction: workflow, scripts, prompt or default rubric | patch |
 | `feat` | A new input, output, config key or behaviour that callers can use | minor |
+| `deps` | A dependency update in `.github/workflows/pr-review.yml` | patch |
 | `refactor` | Code changes with no change in behaviour | none |
 | `docs` | Documentation only | none |
 | `test` | Tests only | none |
@@ -59,6 +60,23 @@ footer, when a footer exists but the title has no `!`, or when the footer is not
 last paragraph.
 
 When you are not sure whether a change is breaking, treat it as breaking.
+
+## Dependency updates
+
+Renovate (`.github/renovate.json5`) updates the pinned actions every weekend.
+
+| Update | PR title | Merge |
+| --- | --- | --- |
+| Action in `pr-review.yml` | `deps: …` (patch release) | see below |
+| Action in the other workflows | `ci(deps): …` (no release) | see below |
+| Minor or patch | | Renovate merges after the required checks pass |
+| Major | | `@camunda/ple` reviews and merges |
+| Digest only (tag moved, no release) | | a person reviews and merges |
+
+A major update is not a breaking change by default. It is breaking only when callers must
+change their workflow YAML, for example because the action needs a new permission or a
+newer runner. Only then change the title to `deps!: …` and add the `BREAKING CHANGE:`
+paragraph described above.
 
 ## Releases
 
