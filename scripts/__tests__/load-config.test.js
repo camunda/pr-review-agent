@@ -141,3 +141,32 @@ test('triggers.max_auto_reviews resolves a whole number, and 0 means no limit', 
   assert.strictEqual(capped.outputs.max_auto_reviews, '4');
   assert.strictEqual(resolveConfig(`${MINIMAL_CONFIG}\ntriggers:\n  max_auto_reviews: 0\n`).config.triggers.max_auto_reviews, 0);
 });
+
+test('vault.github_bot_token is optional: no bot secret without it', () => {
+  const { config, outputs } = resolveConfig(MINIMAL_CONFIG);
+  assert.strictEqual(config.vault.github_bot_token, null);
+  assert.strictEqual(outputs.vault_bot_secret, '');
+});
+
+test('vault.github_bot_token resolves to a Vault secret for the bot token', () => {
+  const { config, outputs } = resolveConfig(`${MINIMAL_CONFIG}  github_bot_token:
+    path: secret/data/products/acme/ci/common
+    field: CAMUNDA_GITHUB_TOKEN
+`);
+  assert.deepStrictEqual(config.vault.github_bot_token, { path: 'secret/data/products/acme/ci/common', field: 'CAMUNDA_GITHUB_TOKEN' });
+  assert.strictEqual(outputs.vault_bot_secret, 'secret/data/products/acme/ci/common CAMUNDA_GITHUB_TOKEN | GITHUB_BOT_TOKEN ;');
+});
+
+test('vault.github_bot_token needs a path and allows no unknown keys', () => {
+  const noPath = load(`${MINIMAL_CONFIG}  github_bot_token:
+    field: CAMUNDA_GITHUB_TOKEN
+`);
+  assert.notStrictEqual(noPath.status, 0);
+  assert.match(noPath.stdout + noPath.stderr, /vault\.github_bot_token\.path is required/);
+  const unknown = load(`${MINIMAL_CONFIG}  github_bot_token:
+    path: secret/data/x
+    login: someone
+`);
+  assert.notStrictEqual(unknown.status, 0);
+  assert.match(unknown.stdout + unknown.stderr, /vault\.github_bot_token\.login/);
+});

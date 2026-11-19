@@ -8,7 +8,18 @@
 # Expects: PR, GITHUB_REPOSITORY and HEAD_SHA (the commit the agent reviewed)
 # env vars (and GH_REPO when run outside the reviewed repo), plus body.md, summary-marker.md, inline-fallback.md, and
 # optionally dropped-duplicates.md in the working directory.
+# Optional: BASE_REF (recorded in the approval), BOT_LOGIN and PR_AUTHOR (set
+# when GH_TOKEN is the bot token of vault.github_bot_token).
+# Writes approved=true to $GITHUB_OUTPUT only when an approval was posted and
+# the head did not move during the POST.
 set -euo pipefail
+
+# GitHub rejects an approval of your own PR. The bot account can be shared with
+# other automation that opens PRs (for example backports): skip, a human approves.
+if [ -n "${BOT_LOGIN:-}" ] && [ "${PR_AUTHOR:-}" = "$BOT_LOGIN" ]; then
+  echo "PR author ${PR_AUTHOR} is the bot account, which cannot approve its own PR — skipping approval."
+  exit 0
+fi
 
 : "${HEAD_SHA:?HEAD_SHA (the reviewed commit) is required}"
 
@@ -96,13 +107,19 @@ if [ -s dropped-duplicates.md ]; then
   } >> body-final.md
 fi
 
+# Record the base branch, so ai-review-dismiss.sh can dismiss this approval when
+# the PR is retargeted. Before the calibration marker, which must stay last.
+if [ -n "${BASE_REF:-}" ]; then
+  printf '\n<!-- ai-review approved-base=%s -->\n' "$BASE_REF" >> body-final.md
+fi
+
 # Append the trusted calibration marker LAST (see the comment path).
 cat summary-marker.md >> body-final.md
 
-# Note: an approval from the built-in GITHUB_TOKEN (github-actions[bot])
-# does NOT count toward required-reviewer branch protection — this is
-# intentional. Auto-merge for the narrow auto-approve categories should
-# be handled by a separate, auditable rule, not by widening this token.
+# Which account approves depends on GH_TOKEN. With the built-in GITHUB_TOKEN
+# (github-actions[bot]) the approval does NOT count toward required-reviewer
+# branch protection. With the bot token (vault.github_bot_token) it does, so
+# ai-review-dismiss.sh removes it as soon as it no longer matches the PR.
 #
 # Re-check the head after the (possibly long) checks wait, then approve through
 # the Reviews API with commit_id = the reviewed commit, so the approval can never
@@ -110,5 +127,16 @@ cat summary-marker.md >> body-final.md
 head_unchanged || exit 0
 jq -n --rawfile body body-final.md --arg sha "$HEAD_SHA" \
   '{event: "APPROVE", body: $body, commit_id: $sha}' > approve.json
-gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/reviews" --input approve.json >/dev/null
+review_id=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/reviews" --input approve.json --jq '.id')
 echo "Approved ${HEAD_SHA}."
+
+# A push can land between the last head check and the POST. Then this approval
+# is for an older commit: dismiss it at once, if it was made by the bot account.
+if ! head_unchanged; then
+  if [ -n "${BOT_LOGIN:-}" ]; then
+    MODE=one REVIEW_ID="$review_id" REASON="new commits were pushed while this approval was posted" \
+      bash "${AGENT_SCRIPTS_DIR:-$(dirname "${BASH_SOURCE[0]}")}/ai-review-dismiss.sh"
+  fi
+  exit 0
+fi
+echo "approved=true" >> "${GITHUB_OUTPUT:-/dev/null}"

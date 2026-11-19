@@ -11,6 +11,11 @@ vault:
   anthropic_api_key:
     # Ask your team's Vault admin for a path your Vault role can read.
     path: secret/data/products/my-team/ci/common
+  # Optional: post everything as a machine user, so a live-mode approval counts.
+  # See "Bot account" in docs/configuration.md.
+  # github_bot_token:
+  #   path: secret/data/products/my-team/ci/common
+  #   field: GITHUB_BOT_TOKEN
 
 triggers:
   # Add this label to a PR (also a draft) to request a review on demand.

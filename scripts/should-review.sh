@@ -15,7 +15,8 @@
 #     adding e.g. the needs-human label does not trigger a second review);
 #   - the PR has not reached triggers.max_auto_reviews (when set). The count is
 #     the number of earlier agent reviews on the PR, read from the
-#     `<!-- ai-review verdict= -->` marker on github-actions[bot] reviews. A
+#     `<!-- ai-review verdict= -->` marker on reviews by github-actions[bot] or
+#     by BOT_LOGIN (the account of vault.github_bot_token, when set). A
 #     manual request (a `labeled` event for the opt-in label) and an Actions
 #     re-run (GITHUB_RUN_ATTEMPT > 1) are never capped. If the reviews cannot be
 #     listed the cap is not enforced: a broken lookup must not block a review.
@@ -64,7 +65,7 @@ if [ "$run" = true ]; then
     reviews_err=$(mktemp)
     if reviews=$(gh api --paginate --slurp -H 'Accept: application/vnd.github+json' \
         "repos/${GITHUB_REPOSITORY}/pulls/${pr}/reviews?per_page=100" 2>"$reviews_err"); then
-      count=$(jq '[.[][] | select(.user.login == "github-actions[bot]")
+      count=$(jq --arg bot "${BOT_LOGIN:-github-actions[bot]}" '[.[][] | select(.user.login == "github-actions[bot]" or .user.login == $bot)
                    | select((.body // "") | contains("<!-- ai-review verdict="))] | length' <<<"$reviews") || count=""
     else
       count=""

@@ -154,3 +154,12 @@ test('max_auto_reviews: if the reviews cannot be listed the review still runs, w
   assert.strictEqual(out.cap_reached, undefined);
   assert.match(out.stderr, /not enforced/);
 });
+
+test('max_auto_reviews: reviews by the bot account (BOT_LOGIN) count too', () => {
+  const byBot = agentReviews(2).map((r) => (r.id <= 2 ? { ...r, user: { login: 'cawemo-jenkins' } } : r));
+  const reviews = [...agentReviews(1, { noise: false }), ...byBot];
+  assert.strictEqual(decide(event(), { config: CAP_CONFIG, reviews }).run, 'true', 'without BOT_LOGIN only 1 counts');
+  const out = decide(event(), { config: CAP_CONFIG, reviews, env: { BOT_LOGIN: 'cawemo-jenkins' } });
+  assert.strictEqual(out.run, 'false');
+  assert.strictEqual(out.review_count, '3');
+});
