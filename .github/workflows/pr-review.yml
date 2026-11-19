@@ -476,9 +476,17 @@ jobs:
           # key is in /proc/self/environ). Prefix rules are not a sandbox: the
           # design still treats everything produced on this runner as
           # untrusted (docs/security-model.md).
+          #
+          # --permission-mode default keeps --allowedTools a strict allowlist:
+          # a tool call that no rule covers is denied. From v1.0.273 the action
+          # starts sessions in auto mode, where a safety review can approve such
+          # calls instead. The action puts its own --permission-mode before
+          # claude_args, and the last one wins. Tested in
+          # scripts/__tests__/review-step-permissions.test.js.
           claude_args: >-
             --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Read,Grep,Glob,Edit(ai-review/**)"
-            --disallowedTools "Read(//proc/**)"${{ needs.config.outputs.model != '' && format(' --model {0}', needs.config.outputs.model) || '' }}
+            --disallowedTools "Read(//proc/**)"
+            --permission-mode default${{ needs.config.outputs.model != '' && format(' --model {0}', needs.config.outputs.model) || '' }}
 
       # The agent could write files (only below ai-review/, unless it escaped
       # its tool rules), so files it could reach are not trusted after this
