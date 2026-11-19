@@ -63,6 +63,9 @@ vault:
   anthropic_api_key:                   # required
     path: secret/data/products/<team>/ci/common
     field: ANTHROPIC_API_KEY           # default ANTHROPIC_API_KEY
+  github_bot_token:                    # optional, see "Bot account" below
+    path: secret/data/products/<team>/ci/common
+    field: GITHUB_BOT_TOKEN            # default GITHUB_BOT_TOKEN
 
 agent:
   model: ""                            # optional; passed as `--model` to Claude Code
@@ -201,6 +204,48 @@ logs in. It hands the key to the agent's job as a single-use wrapping token with
 of 5 minutes, through Infrastructure's shared `vault-wrapped-secrets` action (see the
 [security model](security-model.md), guarantee 8). The actions come from
 `camunda/infra-global-github-actions`, so the calling repository must allow them.
+
+### Bot account (`vault.github_bot_token`)
+
+By default, the workflow posts as `github-actions[bot]`. Its approvals do not count
+toward required-reviewer branch protection. Set `vault.github_bot_token` to a token of a
+GitHub user account (a machine user). Then **every** post of the workflow is made by
+that account: reviews and inline comments in shadow mode, labels, notices, and in live
+mode the approval, which then counts like a human approval.
+
+The workflow keeps such an approval in step with the PR. It does not rely on the repo
+setting "Dismiss stale pull request approvals when new commits are pushed":
+
+| When | What happens |
+| --- | --- |
+| Any PR event, also when no review runs (no opt-in label, review cap, skipped author) | `config` dismisses bot approvals of an older commit or another base branch |
+| The new verdict is `AUTO_APPROVE` in live mode and the approval goes through | `decide` approves the head commit |
+| Any other result for the current head (`NEEDS_HUMAN`, shadow mode, approval skipped) | `decide` dismisses all bot approvals |
+| A push lands while the approval is posted | `decide` dismisses that approval at once |
+
+Only approvals by the bot login that carry the `<!-- ai-review verdict= -->` marker
+are dismissed, so the account can also serve other automation. A failed dismissal fails
+the job. The workflow does not fall back to `github-actions[bot]` when the bot token
+cannot be read. Fork and Dependabot PRs get no Vault secrets and stay on
+`github-actions[bot]`.
+
+Requirements:
+
+- A fine-grained token, limited to the repositories, with **Pull requests: read and
+  write**, **Issues: read and write**, **Contents: read**, **Checks: read** and **Commit
+  statuses: read**. A classic token with `repo` scope also works, but reaches more.
+- The account needs **write** access, or its approval does not count. If branch
+  protection restricts who can dismiss reviews, add the account there.
+- The bot cannot approve a PR it opened. The approve step skips such PRs.
+- To also dismiss approvals when a PR is retargeted, add `edited` to the caller's
+  `pull_request` types (see `examples/caller-workflow.yml`).
+- A token posts like a user, so its reviews and comments trigger `pull_request_review`
+  and `issue_comment` workflows. `github-actions[bot]` posts do not.
+
+The token never reaches the agent's job. `config` reads it to dismiss old approvals
+and to resolve the login. `cap-notice` and `decide` each get it as their own
+single-use wrapping token; the new `bot-token` job wraps it right before `decide`,
+because a wrap from `config` would expire during the review.
 
 To retry a failed review, use **Re-run all jobs**. "Re-run failed jobs" does not re-run
 `config`, so the `review` job gets the already-used token and fails at the unwrap.

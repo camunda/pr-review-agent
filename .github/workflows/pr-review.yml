@@ -104,7 +104,7 @@ permissions: {}
 jobs:
   # ---------------------------------------------------------------------------
   # Job 0 — resolve the team config and decide whether to review at all. Never
-  # touches PR code. The only job that logs in to Vault (and the only one with
+  # touches PR code. Logs in to Vault (with `bot-token`, the only jobs with
   # `id-token: write`): it hands the Anthropic key to `review` as a single-use
   # Vault wrapping token, so the agent's job holds no Vault credentials and
   # cannot mint OIDC tokens.
@@ -135,6 +135,12 @@ jobs:
       needs_human_label: ${{ steps.cfg.outputs.needs_human_label }}
       capture_alert_mentions: ${{ steps.cfg.outputs.capture_alert_mentions }}
       rubric_ref: ${{ steps.cfg.outputs.rubric_ref }}
+      # Bot account (vault.github_bot_token). The token itself never leaves this
+      # job: `cap-notice` and `decide` get it as their own single-use wrap token.
+      bot_enabled: ${{ steps.bot_check.outputs.enabled == 'true' && 'true' || 'false' }}
+      bot_login: ${{ steps.bot_login.outputs.login }}
+      vault_bot_secret: ${{ steps.cfg.outputs.vault_bot_secret }}
+      bot_cap_wrap_token: ${{ steps.bot_cap_wrap_jwt.outputs.wrap-token || steps.bot_cap_wrap.outputs.wrap_token }}
     steps:
       - name: Check Vault auth method
         env:
@@ -196,13 +202,106 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash .pr-review-agent/scripts/load-config.sh
 
+      # Optional bot account (vault.github_bot_token): every post of this
+      # workflow is then made by that account, and its approvals count toward
+      # branch protection. Fork and Dependabot PRs get no Vault secrets; they
+      # stay on github-actions[bot] and never get a bot approval. Only booleans
+      # reach the shell, never the values.
+      - name: Check bot token prerequisites
+        id: bot_check
+        if: steps.cfg.outputs.vault_bot_secret != ''
+        env:
+          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          HAS_VAULT: ${{ secrets.VAULT_ADDR != '' }}
+          METHOD: ${{ inputs.vault_auth_method }}
+          HAS_APPROLE: ${{ secrets.VAULT_ROLE_ID != '' && secrets.VAULT_SECRET_ID != '' }}
+          HAS_JWT: ${{ secrets.VAULT_JWT_PATH != '' && secrets.VAULT_JWT_ROLE != '' }}
+        run: |
+          if [ "$SAME_REPO" != true ] || [ "$HAS_VAULT" != true ]; then
+            echo "::notice::pr-review-agent: no Vault secrets for this PR (fork or Dependabot), so posts use github-actions[bot]."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$METHOD" in
+            approle) [ "$HAS_APPROLE" = true ] || { echo "::error::vault_auth_method=approle needs the VAULT_ROLE_ID and VAULT_SECRET_ID secrets"; exit 1; } ;;
+            jwt) [ "$HAS_JWT" = true ] || { echo "::error::vault_auth_method=jwt needs the VAULT_JWT_PATH and VAULT_JWT_ROLE secrets"; exit 1; } ;;
+          esac
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      # Same `path` rule as "Import agent checkout token".
+      - name: Import the bot token
+        id: bot
+        if: steps.bot_check.outputs.enabled == 'true'
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          method: ${{ inputs.vault_auth_method }}
+          roleId: ${{ secrets.VAULT_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_SECRET_ID }}
+          path: ${{ inputs.vault_auth_method == 'jwt' && secrets.VAULT_JWT_PATH || '' }}
+          role: ${{ secrets.VAULT_JWT_ROLE }}
+          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          # AppRole: the cap-notice wrap below needs the Vault token.
+          outputToken: ${{ inputs.vault_auth_method == 'approle' }}
+          exportEnv: false
+          secrets: ${{ steps.cfg.outputs.vault_bot_secret }}
+
+      - name: Resolve the bot login
+        id: bot_login
+        if: steps.bot_check.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.GITHUB_BOT_TOKEN }}
+        run: |
+          login=$(gh api user --jq .login)
+          echo "pr-review-agent posts as ${login}."
+          echo "login=${login}" >> "$GITHUB_OUTPUT"
+
+      # For EVERY event, also when no review follows (no opt-in label, review cap
+      # reached, skipped author): a bot approval must never outlive the commit
+      # and base branch it was given for. Does not rely on the repo setting
+      # "Dismiss stale pull request approvals".
+      - name: Dismiss bot approvals of an older commit or base
+        if: steps.bot_check.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.GITHUB_BOT_TOKEN }}
+          BOT_LOGIN: ${{ steps.bot_login.outputs.login }}
+          PR: ${{ github.event.pull_request.number }}
+          MODE: stale
+          REASON: the pull request changed (new commits or another base branch) since this approval.
+        run: bash .pr-review-agent/scripts/ai-review-dismiss.sh
+
       - name: Decide whether to review this event
         id: should
         if: steps.cfg.outputs.found == 'true'
         env:
           CONFIG_FILE: ${{ steps.cfg.outputs.config_file }}
           GH_TOKEN: ${{ github.token }}
+          BOT_LOGIN: ${{ steps.bot_login.outputs.login }}
         run: bash .pr-review-agent/scripts/should-review.sh
+
+      # The cap notice is posted by the bot too. `cap-notice` starts right after
+      # this job, so the 5-minute TTL only covers the queue wait.
+      - name: Wrap the bot token for the cap notice (JWT)
+        id: bot_cap_wrap_jwt
+        if: steps.should.outputs.cap_reached == 'true' && steps.bot_check.outputs.enabled == 'true' && inputs.vault_auth_method == 'jwt'
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/wrap@6644ac7ceab8e1b32359cc25a5161c46156fc319 # vault-wrapped-secrets-1.0.1
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-auth-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-auth-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          secrets: ${{ steps.cfg.outputs.vault_bot_secret }}
+          wrap-ttl: 5m
+
+      - name: Wrap the bot token for the cap notice (AppRole)
+        id: bot_cap_wrap
+        if: steps.should.outputs.cap_reached == 'true' && steps.bot_check.outputs.enabled == 'true' && inputs.vault_auth_method == 'approle'
+        env:
+          VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+          VAULT_TOKEN: ${{ steps.bot.outputs.vault_token }}
+          WRAP_NAME: GITHUB_BOT_TOKEN
+          GITHUB_BOT_TOKEN: ${{ steps.bot.outputs.GITHUB_BOT_TOKEN }}
+        run: bash .pr-review-agent/scripts/vault-wrap-key.sh
 
       - name: Check Vault secrets (Anthropic key)
         if: steps.should.outputs.run == 'true'
@@ -308,9 +407,19 @@ jobs:
           name: pr-review-agent-bundle
           path: .pr-review-agent
 
+      - name: Unwrap the bot token
+        id: unwrap_bot
+        if: needs.config.outputs.bot_enabled == 'true'
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/unwrap@6644ac7ceab8e1b32359cc25a5161c46156fc319 # vault-wrapped-secrets-1.0.1
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          wrap-token: ${{ needs.config.outputs.bot_cap_wrap_token }}
+
       - name: Post the review-cap notice (once per PR)
         env:
-          GH_TOKEN: ${{ github.token }}
+          # The bot account when configured; a failed unwrap stops before this.
+          GH_TOKEN: ${{ fromJSON(steps.unwrap_bot.outputs.secrets || '{}').GITHUB_BOT_TOKEN || github.token }}
+          BOT_LOGIN: ${{ needs.config.outputs.bot_login }}
           PR: ${{ github.event.pull_request.number }}
           OPT_IN_LABEL: ${{ needs.config.outputs.opt_in_label }}
           REVIEW_COUNT: ${{ needs.config.outputs.review_count }}
@@ -586,14 +695,75 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
+  # Job 1b — hands the bot token (vault.github_bot_token) to `decide` as a
+  # single-use Vault wrapping token. A wrap from `config` would expire during
+  # the review, so this job wraps it right before `decide` starts: the 5-minute
+  # TTL only has to cover the queue wait. Runs no AI and no PR code, and has no
+  # GitHub write permission. Only runs when the bot account is configured.
+  # ---------------------------------------------------------------------------
+  bot-token:
+    name: Wrap the bot token
+    needs: [config, review]
+    if: always() && needs.review.result == 'success' && needs.config.outputs.bot_enabled == 'true'
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 5
+    permissions:
+      id-token: write
+    outputs:
+      # A single-use wrapping token, not the bot token (see anthropic_wrap_token).
+      wrap_token: ${{ steps.wrap_jwt.outputs.wrap-token || steps.wrap.outputs.wrap_token }}
+    steps:
+      - name: Wrap the bot token (JWT)
+        id: wrap_jwt
+        if: inputs.vault_auth_method == 'jwt'
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/wrap@6644ac7ceab8e1b32359cc25a5161c46156fc319 # vault-wrapped-secrets-1.0.1
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-auth-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-auth-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          secrets: ${{ needs.config.outputs.vault_bot_secret }}
+          wrap-ttl: 5m
+
+      - name: Download pr-review-agent bundle
+        if: inputs.vault_auth_method == 'approle'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pr-review-agent-bundle
+          path: .pr-review-agent
+
+      - name: Read the bot token (AppRole)
+        id: bot
+        if: inputs.vault_auth_method == 'approle'
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          method: approle
+          roleId: ${{ secrets.VAULT_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_SECRET_ID }}
+          outputToken: true
+          exportEnv: false
+          secrets: ${{ needs.config.outputs.vault_bot_secret }}
+
+      - name: Wrap the bot token (AppRole)
+        id: wrap
+        if: inputs.vault_auth_method == 'approle'
+        env:
+          VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+          VAULT_TOKEN: ${{ steps.bot.outputs.vault_token }}
+          WRAP_NAME: GITHUB_BOT_TOKEN
+          GITHUB_BOT_TOKEN: ${{ steps.bot.outputs.GITHUB_BOT_TOKEN }}
+        run: bash .pr-review-agent/scripts/vault-wrap-key.sh
+
+  # ---------------------------------------------------------------------------
   # Job 2 — the gate + action. Holds the ONLY write token. Runs NO AI and has no
   # Anthropic key. Never checks out the reviewed repository: every script comes
   # from the pr-review-agent bundle (this workflow's commit), and `gh` targets the PR via
-  # GH_REPO.
+  # GH_REPO. With vault.github_bot_token, every post is made by the bot account.
   # ---------------------------------------------------------------------------
   decide:
     name: Apply verdict (deterministic gate)
-    needs: [config, review]
+    needs: [config, review, bot-token]
     if: always() && needs.review.result == 'success'
     runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 45
@@ -606,12 +776,36 @@ jobs:
     outputs:
       verdict: ${{ steps.final.outputs.verdict }}
       escalation_type: ${{ steps.final.outputs.escalation_type }}
+    # GH_TOKEN is set by "Select the posting account" (bot token or GITHUB_TOKEN).
     env:
-      GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       PR: ${{ github.event.pull_request.number }}
       SHADOW_MODE: ${{ needs.config.outputs.shadow_mode }}
     steps:
+      # First step, so the 5-minute wrap TTL only has to cover the queue wait.
+      # Fails when `bot-token` failed: no silent fallback to github-actions[bot].
+      - name: Unwrap the bot token
+        id: unwrap_bot
+        if: needs.config.outputs.bot_enabled == 'true'
+        uses: camunda/infra-global-github-actions/vault-wrapped-secrets/unwrap@6644ac7ceab8e1b32359cc25a5161c46156fc319 # vault-wrapped-secrets-1.0.1
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          wrap-token: ${{ needs.bot-token.outputs.wrap_token }}
+
+      - name: Select the posting account
+        env:
+          BOT_ENABLED: ${{ needs.config.outputs.bot_enabled }}
+          BOT_TOKEN: ${{ fromJSON(steps.unwrap_bot.outputs.secrets || '{}').GITHUB_BOT_TOKEN }}
+          DEFAULT_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$BOT_ENABLED" = true ]; then
+            [ -n "$BOT_TOKEN" ] || { echo "::error::pr-review-agent: the bot token is missing after the unwrap."; exit 1; }
+            echo "::add-mask::${BOT_TOKEN}"
+            echo "GH_TOKEN=${BOT_TOKEN}" >> "$GITHUB_ENV"
+          else
+            echo "GH_TOKEN=${DEFAULT_TOKEN}" >> "$GITHUB_ENV"
+          fi
+
       - name: Download pr-review-agent bundle
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -653,11 +847,30 @@ jobs:
       # Live mode only, explicit AUTO_APPROVE only, never on drafts (the script
       # re-reads the current draft state too).
       - name: Approve (live mode only, AUTO_APPROVE only, never on drafts)
+        id: approve
         if: env.SHADOW_MODE == 'false' && steps.final.outputs.verdict == 'AUTO_APPROVE' && github.event.pull_request.draft == false
         env:
           # Approval is anchored to this commit and skipped if the PR moved on.
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BOT_LOGIN: ${{ needs.config.outputs.bot_enabled == 'true' && needs.config.outputs.bot_login || '' }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: bash .pr-review-agent/scripts/ai-review-approve.sh
+
+      # A bot approval counts, so it must go as soon as the latest review of the
+      # current head does not approve: NEEDS_HUMAN, shadow mode, or an approval
+      # that was skipped (draft, red required checks, head moved). The script does
+      # nothing when the PR head moved on: the newer run decides.
+      - name: Dismiss bot approvals unless this run approved
+        if: >-
+          always() && needs.config.outputs.bot_enabled == 'true'
+          && steps.unwrap_bot.outcome == 'success' && steps.approve.outputs.approved != 'true'
+        env:
+          BOT_LOGIN: ${{ needs.config.outputs.bot_login }}
+          MODE: all
+          RUN_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REASON: the latest AI review of this commit did not approve it (needs a human, shadow mode, or approval skipped).
+        run: bash .pr-review-agent/scripts/ai-review-dismiss.sh
 
       # Only job with pull-requests: write, so the transcript-capture alert lives
       # here. Fail closed: anything but a confirmed capture posts an alert;
@@ -668,11 +881,12 @@ jobs:
         env:
           CAPTURED: ${{ needs.review.outputs.session_captured }}
           MENTIONS: ${{ needs.config.outputs.capture_alert_mentions }}
+          BOT_LOGIN: ${{ needs.config.outputs.bot_login || 'github-actions[bot]' }}
         run: |
           set -uo pipefail
           marker='<!-- ai-review-session-capture -->'
           existing="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
-            --jq ".[] | select(.user.login == \"github-actions[bot]\") | select(.body | contains(\"${marker}\")) | .id")"
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" or .user.login == \"${BOT_LOGIN}\") | select(.body | contains(\"${marker}\")) | .id")"
           keep=""
           if [ "${CAPTURED:-}" != "true" ]; then
             cc=""
