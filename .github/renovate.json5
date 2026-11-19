@@ -1,0 +1,116 @@
+// Renovate keeps the SHA-pinned actions in .github/workflows/ up to date.
+// The rules follow camunda/infra-global-github-actions, adapted to how this repository
+// releases (see "Dependency updates" in AGENTS.md).
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:recommended',
+    ':semanticCommits',
+  ],
+  enabledManagers: [
+    'github-actions',
+    'custom.regex',
+  ],
+  timezone: 'Europe/Berlin',
+  schedule: [
+    '* * * * 0,6', // weekends
+  ],
+  labels: [
+    'dependencies',
+  ],
+  // Wait a few days before Renovate proposes a new release, so that a compromised or
+  // broken release is more likely to be found and yanked first.
+  minimumReleaseAge: '3 days',
+  // Renovate merges the PR itself (squash, the only merge method on main) after the
+  // required checks pass. GitHub auto-merge is not used.
+  platformAutomerge: false,
+  automergeStrategy: 'squash',
+  separateMajorMinor: true,
+
+  customManagers: [
+    {
+      // Renovate's github-actions manager drops the sub-action path of
+      // camunda/infra-global-github-actions, and the tags of that repository carry a
+      // family prefix (`vault-wrapped-secrets-1.0.1`). This manager reads the family from
+      // the version comment, so that each family follows its own release line.
+      // Taken from camunda/infra-global-github-actions/renovate-action-versions.json5.
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^\\.github/workflows/.+\\.ya?ml$/',
+      ],
+      matchStrings: [
+        'uses:\\s*camunda/infra-global-github-actions/[\\w./-]+@(?<currentDigest>[a-f0-9]{40})\\s+#\\s*(?<family>[a-z0-9-]+?)-(?<currentValue>\\d+\\.\\d+\\.\\d+)\\b',
+      ],
+      depNameTemplate: 'camunda/infra-global-github-actions/{{{family}}}',
+      packageNameTemplate: 'camunda/infra-global-github-actions',
+      datasourceTemplate: 'github-tags',
+      extractVersionTemplate: '^{{{family}}}-(?<version>\\d+\\.\\d+\\.\\d+)$',
+    },
+  ],
+
+  packageRules: [
+    // The custom manager above handles these pins.
+    {
+      matchManagers: [
+        'github-actions',
+      ],
+      matchPackageNames: [
+        'camunda/infra-global-github-actions',
+      ],
+      enabled: false,
+    },
+
+    // Actions that only this repository's CI and release workflows use: `ci(deps): …`,
+    // no release.
+    {
+      matchFileNames: [
+        '.github/workflows/**',
+      ],
+      semanticCommitType: 'ci',
+      semanticCommitScope: 'deps',
+    },
+
+    // Actions in the reusable workflow reach callers: `deps: …`, a patch release.
+    // A separate branch keeps these updates apart from the same action in the CI
+    // workflows, so that each PR gets one commit type.
+    {
+      matchFileNames: [
+        '.github/workflows/pr-review.yml',
+      ],
+      semanticCommitType: 'deps',
+      semanticCommitScope: '',
+      additionalBranchPrefix: 'pr-review-',
+    },
+
+    // Minor and patch updates: Renovate merges them after the required checks pass.
+    {
+      matchUpdateTypes: [
+        'minor',
+        'patch',
+      ],
+      automerge: true,
+    },
+
+    // Major updates: no automerge. @camunda/ple reviews them. A major update is not a
+    // breaking change by default, so the title stays as it is (see prBodyNotes).
+    {
+      matchUpdateTypes: [
+        'major',
+      ],
+      automerge: false,
+      reviewers: [
+        'team:ple',
+      ],
+      addLabels: [
+        'upgrade:major',
+      ],
+      prBodyNotes: [
+        ':warning: **Major update.** Check the release notes before you merge. The update is not breaking for callers unless one of these is true:\n\n- The action needs a permission that callers do not grant to the job yet.\n- The action needs a newer runner or Node runtime.\n\nOnly then change the title to `deps!: …` and add a `BREAKING CHANGE:` paragraph as the last paragraph of this description (see AGENTS.md). Merge right after the edit, because Renovate can overwrite the title and description.',
+      ],
+    },
+
+    // Digest-only updates (the tag moved, but no new release): no automerge, so that a
+    // person reviews them. Pins must carry the full version (`# v4.6.0`, not `# v4`),
+    // or every update shows up as a digest update.
+  ],
+}
