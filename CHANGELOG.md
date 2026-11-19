@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/camunda/pr-review-agent/compare/v1.0.0...v1.0.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* pin the review agent's session to the default permission mode ([#18](https://github.com/camunda/pr-review-agent/issues/18)) ([3f0aaa5](https://github.com/camunda/pr-review-agent/commit/3f0aaa55e999ebadf749b542a741c9295f834ea4))
+
 ## 1.0.0 (2026-11-18)
 
 
