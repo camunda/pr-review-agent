@@ -451,7 +451,7 @@ jobs:
       # action for running Claude Code agents in CI. Pinned to a commit SHA.
       - name: Run Claude review agent (read-only, produces a verdict file)
         id: claude
-        uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
+        uses: anthropics/claude-code-action@c84e279f859e2591391e95bd309286eb111c345f # v1.0.284
         env:
           # The agent has no git tool. As an extra guard, keep any git process
           # away from system/user config (aliases, external diff and textconv
