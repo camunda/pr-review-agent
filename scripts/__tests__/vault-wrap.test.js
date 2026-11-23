@@ -80,3 +80,17 @@ test('wrap: fails when Vault returns no wrapping token', () => {
   assert.match(res.stdout, /no wrapping token/);
   assert.strictEqual(res.outputs.wrap_token, undefined);
 });
+
+test('wrap: WRAP_NAME=GITHUB_BOT_TOKEN wraps the bot token under its own name', () => {
+  const { res, body } = wrap({
+    response: { wrap_info: { token: WRAP_TOKEN } },
+    env: { WRAP_NAME: 'GITHUB_BOT_TOKEN', GITHUB_BOT_TOKEN: 'ghp_bot', ANTHROPIC_API_KEY: '' },
+  });
+  assert.strictEqual(res.status, 0, res.stderr);
+  assert.deepStrictEqual(JSON.parse(body), { GITHUB_BOT_TOKEN: 'ghp_bot' });
+});
+
+test('wrap: WRAP_NAME only allows the known secrets', () => {
+  const { res } = wrap({ response: { wrap_info: { token: WRAP_TOKEN } }, env: { WRAP_NAME: 'VAULT_TOKEN' } });
+  assert.notStrictEqual(res.status, 0);
+});

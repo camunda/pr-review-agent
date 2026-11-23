@@ -6,7 +6,8 @@
 # script still exits 0.
 #
 # Requires (env): GH_TOKEN (pull-requests: write), GITHUB_REPOSITORY, PR,
-# OPT_IN_LABEL, REVIEW_COUNT, MAX_AUTO_REVIEWS.
+# OPT_IN_LABEL, REVIEW_COUNT, MAX_AUTO_REVIEWS. Optional: BOT_LOGIN (the login of
+# vault.github_bot_token; its notices count as ours too).
 set -uo pipefail
 
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}" "${PR:?PR is required}"
@@ -17,7 +18,7 @@ marker='<!-- ai-review-cap-notice -->'
 comments_url="repos/${GITHUB_REPOSITORY}/issues/${PR}/comments"
 
 if ! existing=$(gh api --paginate "$comments_url" \
-    --jq ".[] | select(.user.login == \"github-actions[bot]\") | select(.body | contains(\"${marker}\")) | .id"); then
+    --jq ".[] | select(.user.login == \"github-actions[bot]\" or .user.login == \"${BOT_LOGIN:-github-actions[bot]}\") | select(.body | contains(\"${marker}\")) | .id"); then
   echo "::warning::pr-review-agent: could not list PR comments; not posting the review-cap notice"
   exit 0
 fi

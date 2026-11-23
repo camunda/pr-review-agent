@@ -58,9 +58,14 @@ flowchart LR
    still the commit the agent reviewed, both before and after that wait, and it
    anchors the approval to that commit (`commit_id`). Runs for the same PR also cancel
    each other (workflow-level `concurrency`). An approval from `github-actions[bot]` does not
-   count toward required-reviewer branch protection.
+   count toward required-reviewer branch protection. An approval from the bot account
+   (`vault.github_bot_token`) counts, so the workflow dismisses it as soon as it no
+   longer matches the head commit and base branch, or the latest review of the head
+   does not approve (see "Bot account" in the configuration docs).
 8. **The agent's job cannot reach Vault.** Only the `config` job logs in to Vault (AppRole
-   or JWT), and only it has `id-token: write`. A team's Vault role can usually read far
+   or JWT), plus the `bot-token` job when a bot account is configured; only these two
+   have `id-token: write`. Neither runs AI or PR code, and `bot-token` has no other
+   permission. The bot token reaches `config`, `cap-notice` and `decide`, never `review`. A team's Vault role can usually read far
    more than the Anthropic key. So `config` wraps only the key in a single-use Vault
    response-wrapping token with a TTL of 5 minutes. This follows Infrastructure's
    [Vault secrets in agentic workflows](https://docs.int.camunda.com/docs/vault/vault-secrets-in-agentic-workflows)

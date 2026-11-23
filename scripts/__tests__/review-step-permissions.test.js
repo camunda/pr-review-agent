@@ -30,3 +30,21 @@ test('review step pins the permission mode to default (last one wins)', () => {
   assert.ok(modes.length > 0, 'claude_args must set --permission-mode');
   assert.strictEqual(modes[modes.length - 1], 'default');
 });
+
+// The bot token (vault.github_bot_token) must never reach the agent's job.
+const jobField = (job, expr) =>
+  execFileSync('yq', ['-o=json', `.jobs["${job}"]${expr}`, WORKFLOW], { encoding: 'utf8' }).trim();
+
+test('bot-token job can only mint OIDC tokens, nothing else', () => {
+  assert.deepStrictEqual(JSON.parse(jobField('bot-token', '.permissions')), { 'id-token': 'write' });
+});
+
+test('the review job never sees the bot token', () => {
+  const review = jobField('review', '');
+  assert.ok(!/bot_cap_wrap_token|bot-token|GITHUB_BOT_TOKEN|vault_bot_secret/.test(review));
+  assert.ok(!JSON.parse(jobField('review', '.needs')).includes('bot-token'));
+});
+
+test('decide unwraps the bot token in its first step', () => {
+  assert.strictEqual(jobField('decide', '.steps[0].id'), '"unwrap_bot"');
+});

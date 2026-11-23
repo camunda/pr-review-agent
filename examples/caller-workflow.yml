@@ -12,7 +12,9 @@ name: ai-pr-review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    # `edited` only matters with vault.github_bot_token: a PR moved to another base
+    # branch then loses its bot approval. Other edits are ignored below.
+    types: [opened, synchronize, reopened, ready_for_review, labeled, edited]
     # paths: ["my-team-dir/**"]   # only PRs that touch your team's code
 
 # Cancel a stale review when a new push arrives on the same PR. github.workflow
@@ -20,9 +22,11 @@ on:
 # A `labeled` event for any label other than your opt_in_label (`ai-review`
 # here) gets its own group and skips the review job, so it never cancels a
 # review that is still running. Keep the label name in sync with your config.
+# The same holds for an `edited` event that does not change the base branch.
 concurrency:
   group: >-
-    ${{ github.event.action == 'labeled' && github.event.label.name != 'ai-review'
+    ${{ ((github.event.action == 'labeled' && github.event.label.name != 'ai-review')
+         || (github.event.action == 'edited' && !github.event.changes.base))
         && format('ai-pr-review-ignored-{0}', github.run_id)
         || format('ai-pr-review-{0}-{1}', github.workflow, github.event.pull_request.number) }}
   cancel-in-progress: true
@@ -31,7 +35,9 @@ permissions: {}
 
 jobs:
   review:
-    if: github.event.action != 'labeled' || github.event.label.name == 'ai-review'
+    if: >-
+      (github.event.action != 'labeled' || github.event.label.name == 'ai-review')
+      && (github.event.action != 'edited' || github.event.changes.base)
     # The called workflow's jobs can only narrow these, never widen them.
     permissions:
       contents: read

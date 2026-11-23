@@ -71,7 +71,12 @@ resolved=$(jq --arg name "$name" '
       anthropic_api_key: {
         path: .vault.anthropic_api_key.path,
         field: (.vault.anthropic_api_key.field | dflt("ANTHROPIC_API_KEY"))
-      }
+      },
+      # Optional. When set, every post of the workflow is made by this account.
+      github_bot_token: (if .vault.github_bot_token == null then null else {
+        path: .vault.github_bot_token.path?,
+        field: (.vault.github_bot_token.field? | dflt("GITHUB_BOT_TOKEN"))
+      } end)
     },
     agent: {
       model: (.agent.model | dflt("")),
@@ -105,8 +110,9 @@ resolved=$(jq --arg name "$name" '
         if type == "object" then (keys - allowed)[] | "\(where).\(.)" else empty end;
       ((keys - ["schema_version","shadow_mode","vault","agent",
                 "triggers","labels","policy","escalation","notifications"])[]),
-      (.vault | unknown("vault"; ["anthropic_api_key"])),
+      (.vault | unknown("vault"; ["anthropic_api_key","github_bot_token"])),
       (.vault.anthropic_api_key? | unknown("vault.anthropic_api_key"; ["path","field"])),
+      (.vault.github_bot_token? | unknown("vault.github_bot_token"; ["path","field"])),
       (.agent | unknown("agent"; ["model","dedup_model","allowed_bots","timeout_minutes"])),
       (.triggers | unknown("triggers"; ["opt_in_label","review_drafts","skip_authors","max_auto_reviews"])),
       (.labels | unknown("labels"; ["needs_human"])),
@@ -141,6 +147,12 @@ errors=$(jq -r '
      then "vault.anthropic_api_key.path is required (e.g. secret/data/products/<team>/ci/common)" else empty end),
     (if (.vault.anthropic_api_key.field | s("^[A-Za-z0-9_-]+$") | not)
      then "vault.anthropic_api_key.field must be an identifier" else empty end),
+    (if .vault.github_bot_token == null then empty
+     elif (.vault.github_bot_token.path | s("^[A-Za-z0-9_./-]+$") | not)
+     then "vault.github_bot_token.path is required when vault.github_bot_token is set" else empty end),
+    (if .vault.github_bot_token == null then empty
+     elif (.vault.github_bot_token.field | s("^[A-Za-z0-9_-]+$") | not)
+     then "vault.github_bot_token.field must be an identifier" else empty end),
     (if (.agent.model | s("^[A-Za-z0-9._:-]*$") | not) then "agent.model has invalid characters" else empty end),
     (if (.agent.dedup_model | s("^[A-Za-z0-9._:-]+$") | not) then "agent.dedup_model has invalid characters" else empty end),
     (if (.agent.allowed_bots | type) != "array" or any(.agent.allowed_bots[]; (. == "*") or (s("^[A-Za-z0-9_-]+$") | not))
@@ -214,6 +226,7 @@ if [ -n "${GITHUB_OUTPUT:-}" ]; then
     echo "config_file=${OUT}"
     echo "shadow_mode=$(jq -r '.shadow_mode' <<<"$resolved")"
     echo "vault_anthropic_secret=$(jq -r '.vault.anthropic_api_key | "\(.path) \(.field) | ANTHROPIC_API_KEY ;"' <<<"$resolved")"
+    echo "vault_bot_secret=$(jq -r '.vault.github_bot_token // empty | "\(.path) \(.field) | GITHUB_BOT_TOKEN ;"' <<<"$resolved")"
     echo "model=$(jq -r '.agent.model' <<<"$resolved")"
     echo "dedup_model=$(jq -r '.agent.dedup_model' <<<"$resolved")"
     echo "allowed_bots=$(jq -r '.agent.allowed_bots | join(",")' <<<"$resolved")"
