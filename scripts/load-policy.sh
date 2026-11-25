@@ -40,19 +40,38 @@ resolve_default() {
   DEFAULT_SHA=$(git rev-parse --verify --quiet "FETCH_HEAD^{commit}") || DEFAULT_SHA=""
 }
 
-# $1 from, $2 path, $3 destination. Returns non-zero if the source is missing.
+# Copies "$1:$2" (rev:path) to $3. A read or write error is NOT "file missing":
+# it removes the partial destination and aborts the whole run (fail closed), so
+# no caller `||` chain or `if` can turn it into a skipped or half-loaded policy.
+show_to() {
+  if ! git show "$1:$2" > "$3" 2>/dev/null; then
+    rm -f "$3"
+    echo "::error::could not read repo file '$2' at $1 or write it to '$3'; failing closed"
+    exit 1
+  fi
+}
+
+# $1 from, $2 path, $3 destination. Returns non-zero only if the source is
+# missing. Anything else that goes wrong exits the script.
 fetch() {
   case "$1" in
     agent) [ -f "${AGENT_DIR}/$2" ] && cp "${AGENT_DIR}/$2" "$3" ;;
-    repo)  if git cat-file -e "${BASE_SHA}:$2" 2>/dev/null; then
-             git show "${BASE_SHA}:$2" > "$3"
-             return
+    repo)  # A missing base commit (failed fetch) is not a missing file: without
+           # this check the fallback would silently replace a rubric that may
+           # exist at the PR base. Fail closed instead.
+           if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+             echo "::error::PR base commit ${BASE_SHA} is not available locally (fetch failed?); cannot read repo file '$2' from it, failing closed"
+             exit 1
+           fi
+           if git cat-file -e "${BASE_SHA}:$2" 2>/dev/null; then
+             show_to "${BASE_SHA}" "$2" "$3"
+             return 0
            fi
            # Missing at the PR base (e.g. the PR was opened before the file was
            # added): use the default branch, never the PR head or the merge ref.
            resolve_default
            { [ -n "$DEFAULT_SHA" ] && git cat-file -e "${DEFAULT_SHA}:$2" 2>/dev/null; } || return 1
-           git show "${DEFAULT_SHA}:$2" > "$3"
+           show_to "${DEFAULT_SHA}" "$2" "$3"
            echo "::warning::repo file '$2' not found at PR base ${BASE_SHA}; read it from the default branch '${DEFAULT_BRANCH}' (${DEFAULT_SHA}) instead"
            ;;
     *)     return 1 ;;

@@ -4,6 +4,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 const { runScript, tmpdir, resolveConfig, git, MINIMAL_CONFIG } = require('./helpers');
 
@@ -181,6 +182,57 @@ test('a repo skill missing at the base and on the default branch warns and conti
   const { res } = loadStale(`${MINIMAL_CONFIG}\npolicy:\n  skills:\n    - path: nope/SKILL.md\n`);
   assert.strictEqual(res.status, 0, res.stderr);
   assert.match(res.stdout, /::warning::review skill 'nope\/SKILL\.md' \(from: repo\) not found at PR base [0-9a-f]{40} and default branch 'main'/);
+});
+
+test('an unavailable PR base commit fails closed and never uses the default branch', () => {
+  // The base SHA cannot be fetched or found locally, so "file missing" cannot be
+  // told from "commit missing". The default branch has the files, but must not be used.
+  const bogus = 'deadbeef'.repeat(5);
+  const skillOnly = `${MINIMAL_CONFIG}\npolicy:\n  skills:\n    - path: .agents/skills/review/SKILL.md\n`;
+  for (const [yaml, repoRubric] of [[REPO_POLICY, true], [skillOnly, false]]) {
+    const { res, dir } = loadStale(yaml, { BASE_SHA: bogus });
+    assert.notStrictEqual(res.status, 0, 'must exit non-zero');
+    assert.match(res.stdout, new RegExp(`::error::PR base commit ${bogus} is not available locally`));
+    assert.ok(!/default branch/.test(res.stdout), 'no fallback to the default branch');
+    // With a skill-only config the rubric comes from the agent checkout and may exist.
+    if (repoRubric) assert.ok(!fs.existsSync(path.join(dir, '.policy/rubric.md')));
+    assert.deepStrictEqual(fs.readdirSync(path.join(dir, '.policy/skills')), []);
+  }
+});
+
+/** A PATH dir whose `git show` writes partial output and fails; other commands pass through. */
+function failingShowGit() {
+  const real = execFileSync('bash', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  const bin = tmpdir('bin');
+  fs.writeFileSync(path.join(bin, 'git'), `#!/usr/bin/env bash\nif [ "$1" = show ]; then echo PARTIAL; exit 1; fi\nexec ${real} "$@"\n`);
+  fs.chmodSync(path.join(bin, 'git'), 0o755);
+  return `${bin}:${process.env.PATH}`;
+}
+
+test('a failing git show fails closed and leaves no partial rubric or skill', () => {
+  // Base has the files; the default branch fallback is exercised by a stale base.
+  const stubbed = failingShowGit();
+  const skillOnly = `${MINIMAL_CONFIG}\npolicy:\n  skills:\n    - path: .agents/skills/review/SKILL.md\n`;
+  for (const [yaml, repoRubric] of [[REPO_POLICY, true], [skillOnly, false]]) {
+    // Stale base: the read happens in the default-branch fallback.
+    const stale = loadStale(yaml, { PATH: stubbed });
+    // Base has the file: the read happens at the base commit.
+    const { file, agentDir } = resolveConfig(yaml);
+    const { dir, base } = repoWithBaseAndHead();
+    const atBase = runScript('load-policy.sh', {
+      cwd: dir,
+      env: { CONFIG_FILE: file, AGENT_DIR: agentDir, BASE_SHA: base, PATH: stubbed },
+    });
+    for (const [res, d] of [[stale.res, stale.dir], [atBase, dir]]) {
+      assert.notStrictEqual(res.status, 0, 'must exit non-zero');
+      assert.match(res.stdout, /::error::could not read repo file/);
+      assert.ok(!/Loaded skill/.test(res.stdout), 'no skill may count as loaded');
+      if (repoRubric) assert.ok(!/Loaded rubric/.test(res.stdout), 'the rubric may not count as loaded');
+      assert.ok(!/::warning::repo file/.test(res.stdout), 'no fallback success warning');
+      if (repoRubric) assert.ok(!fs.existsSync(path.join(d, '.policy/rubric.md')), 'no partial rubric');
+      assert.deepStrictEqual(fs.readdirSync(path.join(d, '.policy/skills')), []);
+    }
+  }
 });
 
 test('render-prompt substitutes every placeholder from trusted inputs', () => {
