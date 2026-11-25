@@ -115,7 +115,42 @@ function git(cwd, ...args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
+/** Write `files` (repo-relative path -> content, null deletes) into `dir`. */
+function applyFiles(dir, files) {
+  for (const [rel, content] of Object.entries(files)) {
+    const file = path.join(dir, rel);
+    if (content === null) {
+      fs.rmSync(file, { force: true });
+      continue;
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, content);
+  }
+}
+
+/**
+ * A git repo for check-contract.sh. The base commit holds scripts/ and prompts/
+ * from ROOT plus `base`; `head` is applied to the working tree without a commit.
+ * Returns { dir, baseSha }.
+ */
+function contractRepo({ base = {}, head = {} } = {}) {
+  const dir = tmpdir('contract');
+  git(dir, 'init', '-q');
+  git(dir, 'config', 'user.email', 'test@example.com');
+  git(dir, 'config', 'user.name', 'test');
+  git(dir, 'config', 'commit.gpgsign', 'false');
+  for (const sub of ['scripts', 'prompts']) {
+    fs.cpSync(path.join(ROOT, sub), path.join(dir, sub), { recursive: true });
+  }
+  applyFiles(dir, base);
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-q', '-m', 'base');
+  const baseSha = git(dir, 'rev-parse', 'HEAD');
+  applyFiles(dir, head);
+  return { dir, baseSha };
+}
+
 module.exports = {
   ROOT, SCRIPTS, tmpdir, readOutputs, runScript, agentDir, configEnv, MINIMAL_CONFIG,
-  resolveConfig, ghStubDir, git,
+  resolveConfig, ghStubDir, git, contractRepo,
 };
