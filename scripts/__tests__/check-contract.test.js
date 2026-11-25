@@ -298,3 +298,12 @@ test('no fixtures in base skips with notice', () => {
   assert.strictEqual(res.status, 0, res.out);
   assert.match(res.out, /::notice::.*no config fixtures.*skipping the config check/i);
 });
+
+test('changed built-in escalation rule passes', () => {
+  // builtin_rules and effective_rules come from code, not from the caller's config.
+  const head = { [LOAD_CONFIG]: replaceIn(loadConfig, '{reason: "reviewer workflow", paths: [".github/workflows/*"]}',
+    '{reason: "reviewer workflow", paths: [".github/workflows/*", ".github/actions/*"]}') };
+  const res = checkConfig({ head, title: 'fix: x' });
+  assert.strictEqual(res.status, 0, res.out);
+  assert.doesNotMatch(res.out, /::error/);
+});

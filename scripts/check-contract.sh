@@ -148,6 +148,8 @@ check_config() {
   while IFS= read -r f; do
     name=$(basename "$f")
     git show "$BASE_SHA:$f" > "$tmp/$name"
+    # Never compare a result left over from the previous fixture.
+    rm -f "$tmp/base.json" "$tmp/head.json"
     if ! load_config "$tmp/base" "$tmp/$name" "$tmp/base.json" "$tmp/err"; then
       echo "::error::config $name: the base load-config.sh rejects this fixture, so the fixture or the base is broken: $(head -n 1 "$tmp/err" | sed 's/^::error:://')"
       exit 1
@@ -158,11 +160,15 @@ check_config() {
     fi
     # Every leaf path of the base result (arrays compare whole) must be equal
     # in the head result. Extra keys in the head are allowed.
+    # escalation.builtin_rules and .effective_rules come from code (review
+    # behaviour), not from the caller's config, so they are not compared.
     diffs=$(jq -rn --slurpfile b "$tmp/base.json" --slurpfile h "$tmp/head.json" '
+      def caller: del(.escalation.builtin_rules, .escalation.effective_rules);
       def leaves(p): if type == "object" and length > 0
         then to_entries[] as $e | $e.value | leaves(p + [$e.key]) else p end;
-      $b[0] | leaves([]) as $p
-      | ($b[0] | getpath($p)) as $o | ($h[0] | try getpath($p) catch null) as $n
+      ($b[0] | caller) as $base | ($h[0] | caller) as $head
+      | $base | leaves([]) as $p
+      | ($base | getpath($p)) as $o | ($head | try getpath($p) catch null) as $n
       | select($o != $n)
       | "\($p | join("."))\tchanged from \($o | tojson) to \($n | tojson)"')
     while IFS=$'\t' read -r item reason; do
