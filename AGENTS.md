@@ -66,6 +66,12 @@ The same check also compares the caller contract with the PR base. It reads the
 fixtures. A breaking difference without `!` in the title fails the check. A new config
 key must also go into `scripts/__tests__/fixtures/contract/full.yml`.
 
+Tightening the validation of an existing config key is breaking, for example a higher
+minimum or a shorter maximum length. When you tighten a rule, first add the old
+boundary value to a contract fixture (`edge.yml` holds them), so that the check sees the
+break. The check does not cover the workflow's runtime checks on inputs, for example
+the Vault secret pairs in `pr-review.yml`. Review those changes by hand.
+
 ## Dependency updates
 
 Renovate (`.github/renovate.json5`) updates the pinned actions every weekend.

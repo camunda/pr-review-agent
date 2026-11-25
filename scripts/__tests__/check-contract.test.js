@@ -293,7 +293,7 @@ test('fixture edited in head is ignored', () => {
 });
 
 test('no fixtures in base skips with notice', () => {
-  const base = { [`${FIXTURES}/minimal.yml`]: null, [`${FIXTURES}/full.yml`]: null };
+  const base = Object.fromEntries(fs.readdirSync(path.join(ROOT, FIXTURES)).map((f) => [`${FIXTURES}/${f}`, null]));
   const res = checkConfig({ base, title: 'fix: x' });
   assert.strictEqual(res.status, 0, res.out);
   assert.match(res.out, /::notice::.*no config fixtures.*skipping the config check/i);
@@ -306,4 +306,12 @@ test('changed built-in escalation rule passes', () => {
   const res = checkConfig({ head, title: 'fix: x' });
   assert.strictEqual(res.status, 0, res.out);
   assert.doesNotMatch(res.out, /::error/);
+});
+
+test('tightened validation is breaking', () => {
+  // edge.yml sets timeout_minutes to the lowest value that loads today.
+  const head = { [LOAD_CONFIG]: replaceIn(loadConfig, '.agent.timeout_minutes < 5', '.agent.timeout_minutes < 10') };
+  const res = checkConfig({ head, title: 'fix: x' });
+  assert.strictEqual(res.status, 1, res.out);
+  assert.match(res.out, /::error title=Breaking change::config edge\.yml: rejected: .*timeout_minutes/);
 });

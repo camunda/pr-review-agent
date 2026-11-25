@@ -1,0 +1,43 @@
+# Boundary values that load-config.sh accepts today. A head that rejects one of
+# them tightened the validation of an existing key, which is a breaking change.
+schema_version: 1
+shadow_mode: true
+vault:
+  anthropic_api_key:
+    path: secret/data/products/acme_team/ci-common/v2.0
+    field: CLAUDE_API-KEY_2
+agent:
+  model: ""
+  dedup_model: "claude-haiku-4-5:2026.1_x"
+  allowed_bots:
+    - acme_bot-2
+  timeout_minutes: 5
+triggers:
+  opt_in_label: "area/ai-review: needs.a.look from-the platform tms"
+  review_drafts: false
+  skip_authors:
+    - renovate[bot]
+    - my_org-bot[bot]
+  max_auto_reviews: 1
+labels:
+  needs_human: ""
+policy:
+  rubric:
+    from: agent
+    path: prompts/rubric-default.md
+  skills:
+    - from: agent
+      path: prompts/review-prompt.md
+    - path: "docs/review skills/@team+x.md"
+  instructions: ""
+escalation:
+  rules:
+    - reason: "infra (terraform) v1.2/x_y"
+      paths:
+        - "infra/[a-z]?/*.tf"
+        - "docs/design notes/*"
+        - "@scope/pkg+x/**"
+notifications:
+  capture_alert_mentions:
+    - "@octo-user"
+    - "@acme-org/platform.team_x"
