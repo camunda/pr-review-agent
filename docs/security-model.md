@@ -152,8 +152,9 @@ the team's Vault role and OIDC access out of reach in any case.
 ## Before enabling live mode
 
 - Calibrate in shadow mode. Each review ends with a
-  `<!-- ai-review verdict=… escalation_type=… confidence=… shadow=… -->` marker, so
-  you can backtest which PRs would have been auto-approved.
+  `<!-- ai-review verdict=… escalation_type=… confidence=… shadow=… config=… -->`
+  marker (`config=` names the team config and is the last attribute; reviews posted
+  before it existed have none), so you can backtest which PRs would have been auto-approved.
 - File the InfoSec exception for automated approvals in your repository.
 - Make sure branch protection still requires a human or CODEOWNER review where needed.
   The bot's approval is not meant to replace it.

@@ -201,6 +201,7 @@ jobs:
         if: steps.cfg.outputs.found == 'true'
         env:
           CONFIG_FILE: ${{ steps.cfg.outputs.config_file }}
+          CONFIG_NAME: ${{ inputs.config }}
           GH_TOKEN: ${{ github.token }}
         run: bash .pr-review-agent/scripts/should-review.sh
 
@@ -284,9 +285,9 @@ jobs:
   # triggers.max_auto_reviews. Runs no AI and no PR code; its scripts come from
   # the bundle. Best effort: continue-on-error on the whole job means a failure
   # anywhere in it (bundle download included) never fails the calling workflow.
-  # The concurrency group is shared by every config of the repository (the
-  # workflow-level group is per config), so two configs cannot both post a
-  # notice for the same PR; queued runs wait instead of being cancelled.
+  # Each config posts its own notice (the cap is per config), so the group is
+  # per config and PR: one notice per config, and queued runs of the same config
+  # wait instead of being cancelled.
   # ---------------------------------------------------------------------------
   cap-notice:
     name: Review cap notice
@@ -296,7 +297,7 @@ jobs:
     timeout-minutes: 5
     continue-on-error: true
     concurrency:
-      group: pr-review-agent-cap-notice-${{ github.repository }}-${{ github.event.pull_request.number }}
+      group: pr-review-agent-cap-notice-${{ github.repository }}-${{ inputs.config }}-${{ github.event.pull_request.number }}
       cancel-in-progress: false
     permissions:
       contents: read
@@ -308,10 +309,11 @@ jobs:
           name: pr-review-agent-bundle
           path: .pr-review-agent
 
-      - name: Post the review-cap notice (once per PR)
+      - name: Post the review-cap notice (once per PR and config)
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
+          CONFIG_NAME: ${{ inputs.config }}
           OPT_IN_LABEL: ${{ needs.config.outputs.opt_in_label }}
           REVIEW_COUNT: ${{ needs.config.outputs.review_count }}
           MAX_AUTO_REVIEWS: ${{ needs.config.outputs.max_auto_reviews }}
@@ -639,6 +641,7 @@ jobs:
           GATE_MATCH: ${{ steps.gate.outputs.match }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           RUBRIC_REF: ${{ needs.config.outputs.rubric_ref }}
+          CONFIG_NAME: ${{ inputs.config }}
         run: bash .pr-review-agent/scripts/ai-review-compute-verdict.sh
 
       - name: Post review (shadow mode, or any NEEDS_HUMAN)

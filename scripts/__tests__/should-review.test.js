@@ -154,3 +154,69 @@ test('max_auto_reviews: if the reviews cannot be listed the review still runs, w
   assert.strictEqual(out.cap_reached, undefined);
   assert.match(out.stderr, /not enforced/);
 });
+
+// Per-config caps. Two configs in one repository (two teams) each get their own
+// budget: a review counts only for the config named in its marker.
+const marker = (config) => `<!-- ai-review verdict=NEEDS_HUMAN escalation_type=POLICY confidence=0.90 shadow=true${config ? ` config=${config}` : ''} -->`;
+const botReview = (id, config, extra = '') => ({ id, user: { login: 'github-actions[bot]' }, body: `Summary${extra}\n${marker(config)}\n` });
+
+test('max_auto_reviews: reviews of another config do not count against this config', () => {
+  const reviews = [botReview(1, 'tasklist'), botReview(2, 'tasklist'), botReview(3, 'tasklist'), botReview(4, 'operate-admin')];
+  const out = decide(event(), { config: CAP_CONFIG, reviews, env: { CONFIG_NAME: 'operate-admin' } });
+  assert.strictEqual(out.run, 'true', '1 of 3 own reviews');
+  assert.strictEqual(out.cap_reached, undefined);
+  const other = decide(event(), { config: CAP_CONFIG, reviews, env: { CONFIG_NAME: 'tasklist' } });
+  assert.strictEqual(other.run, 'false', '3 of 3 own reviews');
+  assert.strictEqual(other.review_count, '3');
+  assert.strictEqual(other.skip_reason, 'auto-review cap reached (3/3)');
+});
+
+test('max_auto_reviews: two configs with 3 reviews each, only own reviews are counted', () => {
+  // The W47 shape: both pods reviewed the same PR. Neither is at its cap of 4.
+  const reviews = [1, 2, 3].flatMap((i) => [botReview(i, 'tasklist'), botReview(i + 10, 'operate-admin')]);
+  const { file: cap4 } = resolveConfig(`${MINIMAL_CONFIG}\ntriggers:\n  max_auto_reviews: 4\n`);
+  for (const name of ['tasklist', 'operate-admin']) {
+    assert.strictEqual(decide(event(), { config: cap4, reviews, env: { CONFIG_NAME: name } }).run, 'true', name);
+  }
+});
+
+test('max_auto_reviews: a legacy marker without config= counts toward every config', () => {
+  const reviews = [botReview(1, ''), botReview(2, ''), botReview(3, 'tasklist')];
+  const a = decide(event(), { config: CAP_CONFIG, reviews, env: { CONFIG_NAME: 'tasklist' } });
+  assert.strictEqual(a.run, 'false');
+  assert.strictEqual(a.review_count, '3');
+  const b = decide(event(), { config: CAP_CONFIG, reviews, env: { CONFIG_NAME: 'operate-admin' } });
+  assert.strictEqual(b.run, 'true', '2 legacy reviews, none of its own');
+  const c = decide(event(), { config: CAP_CONFIG, reviews: [...reviews, botReview(4, 'operate-admin')], env: { CONFIG_NAME: 'operate-admin' } });
+  assert.strictEqual(c.run, 'false', '2 legacy + 1 own');
+  assert.strictEqual(c.review_count, '3');
+});
+
+test('max_auto_reviews: config= is read by name, wherever it sits in the marker', () => {
+  const reordered = { id: 1, user: { login: 'github-actions[bot]' }, body: '<!-- ai-review verdict=NEEDS_HUMAN config=tasklist shadow=true -->' };
+  const reviews = [reordered, reordered, reordered];
+  assert.strictEqual(decide(event(), { config: CAP_CONFIG, reviews, env: { CONFIG_NAME: 'tasklist' } }).run, 'false');
+  assert.strictEqual(decide(event(), { config: CAP_CONFIG, reviews, env: { CONFIG_NAME: 'operate-admin' } }).run, 'true');
+});
+
+test('max_auto_reviews: a config name that is a prefix of another is not confused with it', () => {
+  const reviews = [botReview(1, 'app'), botReview(2, 'app'), botReview(3, 'app')];
+  assert.strictEqual(decide(event(), { config: CAP_CONFIG, reviews, env: { CONFIG_NAME: 'app-integrations' } }).run, 'true');
+  assert.strictEqual(decide(event(), { config: CAP_CONFIG, reviews, env: { CONFIG_NAME: 'app' } }).run, 'false');
+});
+
+test('max_auto_reviews: the last marker in the body decides the config', () => {
+  // The agent cannot forge a marker (its text is escaped), but a stray earlier
+  // marker-like string must not win over the trusted one on the last line.
+  const body = `quote: <!-- ai-review verdict=NEEDS_HUMAN config=tasklist -->\n${marker('operate-admin')}\n`;
+  const reviews = [1, 2, 3].map((id) => ({ id, user: { login: 'github-actions[bot]' }, body }));
+  assert.strictEqual(decide(event(), { config: CAP_CONFIG, reviews, env: { CONFIG_NAME: 'tasklist' } }).run, 'true');
+  assert.strictEqual(decide(event(), { config: CAP_CONFIG, reviews, env: { CONFIG_NAME: 'operate-admin' } }).run, 'false');
+});
+
+test('max_auto_reviews: without CONFIG_NAME every review counts, as before', () => {
+  const reviews = [botReview(1, 'tasklist'), botReview(2, 'operate-admin'), botReview(3, '')];
+  const out = decide(event(), { config: CAP_CONFIG, reviews });
+  assert.strictEqual(out.run, 'false');
+  assert.strictEqual(out.review_count, '3');
+});

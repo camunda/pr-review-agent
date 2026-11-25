@@ -98,3 +98,30 @@ test('anti-injection neutralisation still holds inside the collapsed block', () 
   assert.ok(body.includes(`@${ZWSP}org/team`), '@ gets a zero-width space');
   assert.ok(!body.includes('<!-- sneak -->'), 'HTML-comment opener is neutralised');
 });
+
+// The marker is machine-read: the usage report parses verdict, escalation_type,
+// confidence and shadow by name, and the review cap counts reviews per config.
+// `config=` is appended LAST so those parsers keep working.
+test('the marker carries the config name as its last attribute', () => {
+  const { marker } = compute(baseVerdict(), { CONFIG_NAME: 'operate-admin' });
+  assert.strictEqual(
+    marker,
+    '<!-- ai-review verdict=NEEDS_HUMAN escalation_type=POLICY confidence=0.90 shadow=true config=operate-admin -->\n',
+  );
+  // The pre-config attributes still parse with the regex an older consumer uses.
+  const m = marker.match(/^<!-- ai-review verdict=(\S+) escalation_type=(\S+) confidence=(\S+) shadow=(\S+)(?: .*)? -->$/m);
+  assert.deepStrictEqual(m.slice(1), ['NEEDS_HUMAN', 'POLICY', '0.90', 'true']);
+});
+
+test('without a config name the marker keeps its previous format', () => {
+  const { marker } = compute(baseVerdict(), { CONFIG_NAME: '' });
+  assert.strictEqual(marker, '<!-- ai-review verdict=NEEDS_HUMAN escalation_type=POLICY confidence=0.90 shadow=true -->\n');
+});
+
+test('a config name that is not a valid config name never reaches the marker', () => {
+  for (const bad of ['Team', 'a b', 'a-->b', 'a..b', '-x', 'x\ny']) {
+    const { marker } = compute(baseVerdict(), { CONFIG_NAME: bad });
+    assert.ok(!marker.includes('config='), `'${bad}' is left out`);
+    assert.strictEqual(marker.trim().split('\n').length, 1, 'marker stays one line');
+  }
+});

@@ -14,14 +14,20 @@
 #   - a `labeled` event is for the opt-in label (any other label is ignored, so
 #     adding e.g. the needs-human label does not trigger a second review);
 #   - the PR has not reached triggers.max_auto_reviews (when set). The count is
-#     the number of earlier agent reviews on the PR, read from the
-#     `<!-- ai-review verdict= -->` marker on github-actions[bot] reviews. A
-#     manual request (a `labeled` event for the opt-in label) and an Actions
-#     re-run (GITHUB_RUN_ATTEMPT > 1) are never capped. If the reviews cannot be
-#     listed the cap is not enforced: a broken lookup must not block a review.
+#     the number of earlier agent reviews of THIS config on the PR, read from the
+#     `<!-- ai-review verdict= ... config=NAME -->` marker on github-actions[bot]
+#     reviews, so two configs in one repository (two teams) each get their own
+#     budget. A review whose marker has no `config=` (posted before the marker
+#     carried it) counts toward every config, so the cap never loosens on PRs
+#     that are already in flight. A manual request (a `labeled` event for the
+#     opt-in label) and an Actions re-run (GITHUB_RUN_ATTEMPT > 1) are never
+#     capped. If the reviews cannot be listed the cap is not enforced: a broken
+#     lookup must not block a review.
 #
 # Requires (env): GITHUB_EVENT_NAME, GITHUB_EVENT_PATH, GITHUB_REPOSITORY,
 # CONFIG_FILE. Needs GH_TOKEN (pull-requests: read) only when a cap is set.
+# Optional (env): CONFIG_NAME, the name of the team config (the workflow's
+# `config` input). When it is empty every review counts, as before per-config caps.
 # Writes run=true|false and skip_reason to $GITHUB_OUTPUT, plus cap_reached=true
 # and review_count when the cap is what stopped the run.
 set -euo pipefail
@@ -64,8 +70,16 @@ if [ "$run" = true ]; then
     reviews_err=$(mktemp)
     if reviews=$(gh api --paginate --slurp -H 'Accept: application/vnd.github+json' \
         "repos/${GITHUB_REPOSITORY}/pulls/${pr}/reviews?per_page=100" 2>"$reviews_err"); then
-      count=$(jq '[.[][] | select(.user.login == "github-actions[bot]")
-                   | select((.body // "") | contains("<!-- ai-review verdict="))] | length' <<<"$reviews") || count=""
+      # The config is read from the LAST summary marker in the body (the trusted
+      # one is always the last line). No `config=` attribute means a legacy
+      # review: it counts for every config. A body that has the marker prefix
+      # but no closing `-->` is treated the same way.
+      count=$(jq --arg cfg "${CONFIG_NAME:-}" '
+        [.[][] | select(.user.login == "github-actions[bot]")
+         | select((.body // "") | contains("<!-- ai-review verdict="))
+         | ([.body | scan("<!-- ai-review verdict=[^>]*-->")] | last // "") as $marker
+         | ([$marker | capture(" config=(?<c>[^ >]+)") | .c][0] // "") as $c
+         | select($cfg == "" or $c == "" or $c == $cfg)] | length' <<<"$reviews") || count=""
     else
       count=""
     fi
