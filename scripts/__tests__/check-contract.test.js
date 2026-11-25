@@ -189,3 +189,23 @@ test('null blocks do not crash', () => {
   const res = check({ base, head, title: 'feat: x' });
   assert.strictEqual(res.status, 0, res.out);
 });
+
+test('job without permissions inherits the workflow block', () => {
+  const base = edit('.permissions = {} | del(.jobs.decide.permissions)');
+  const head = edit('.permissions = {"actions": "read"}', base);
+  const res = check({ base, head, title: 'fix: x' });
+  assert.strictEqual(res.status, 1, res.out);
+  assert.match(res.out, /permissions\.actions: read/);
+});
+
+test('removed default is breaking', () => {
+  const res = check({ head: edit('del(.on.workflow_call.inputs.runs_on.default)'), title: 'fix: x' });
+  assert.strictEqual(res.status, 1, res.out);
+  assert.match(res.out, /inputs\.runs_on: default "ubuntu-slim" removed/);
+});
+
+test('new required secret is breaking', () => {
+  const res = check({ head: edit('.on.workflow_call.secrets.TOKEN = {"required": true}'), title: 'feat: x' });
+  assert.strictEqual(res.status, 1, res.out);
+  assert.match(res.out, /secrets\.TOKEN: new required secret/);
+});

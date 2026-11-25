@@ -10,8 +10,9 @@
 #   - secrets: removed; new required secret; optional -> required.
 #   - outputs: removed. A changed description is only a ::warning::.
 #   - permissions: the union over all jobs (per scope the highest level,
-#              none < read < write). A new scope or a higher level is breaking,
-#              because the calling job must grant it.
+#              none < read < write). A job without a `permissions` key
+#              inherits the workflow-level block. A new scope or a higher
+#              level is breaking, because the calling job must grant it.
 #
 # Env: BASE_SHA, PR_TITLE, CONTRACT_WORKFLOW (default .github/workflows/pr-review.yml).
 # Runs in the repo root. Each break prints ::error:: (no "!" in the title) or
@@ -43,12 +44,15 @@ report_break() {
 #  outputs:{name:{description}}, permissions:{scope:level}}.
 interface_json() {
   local json
+  # Effective permissions per job: its own block, else the workflow-level one.
+  local defs='def job_perms: (.permissions // {}) as $top
+    | [(.jobs // {})[] | (if has("permissions") then .permissions else $top end) // {}];'
   json=$(yq -o=json '.' <<< "$1")
-  if jq -e '[(.jobs // {})[] | .permissions | strings] | length > 0' <<< "$json" > /dev/null; then
+  if jq -e "$defs"'job_perms | map(strings) | length > 0' <<< "$json" > /dev/null; then
     echo "::error::$workflow: a job sets 'permissions' to a string (read-all or write-all). The contract check does not support it; list the scopes." >&2
     exit 1
   fi
-  jq '
+  jq "$defs"'
     {"none": 0, "read": 1, "write": 2} as $rank
     | (.on.workflow_call // {}) as $c
     | {
@@ -57,7 +61,7 @@ interface_json() {
         secrets: (($c.secrets // {}) | map_values({required: ((. // {}).required // false)})),
         outputs: (($c.outputs // {}) | map_values({description: (. // {}).description})),
         permissions: (
-          [(.jobs // {})[] | (.permissions // {}) | to_entries[]]
+          [job_perms[] | to_entries[]]
           | group_by(.key)
           | map({key: .[0].key, value: (map(.value) | max_by($rank[.] // 0))})
           | from_entries)
