@@ -5,7 +5,9 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const { execFileSync } = require('node:child_process');
-const { runScript, contractRepo } = require('./helpers');
+const fs = require('node:fs');
+const path = require('node:path');
+const { ROOT, runScript, contractRepo } = require('./helpers');
 
 const WORKFLOW = '.github/workflows/pr-review.yml';
 
@@ -208,4 +210,91 @@ test('new required secret is breaking', () => {
   const res = check({ head: edit('.on.workflow_call.secrets.TOKEN = {"required": true}'), title: 'feat: x' });
   assert.strictEqual(res.status, 1, res.out);
   assert.match(res.out, /secrets\.TOKEN: new required secret/);
+});
+
+test('missing base workflow fails with an error', () => {
+  const { dir, baseSha } = contractRepo({ base: { [WORKFLOW]: null }, head: { [WORKFLOW]: BASE } });
+  const res = runScript('check-contract.sh', { cwd: dir, env: { BASE_SHA: baseSha, PR_TITLE: 'fix: x' } });
+  const out = res.stdout + res.stderr;
+  assert.strictEqual(res.status, 1, out);
+  assert.match(out, /::error::cannot read \.github\/workflows\/pr-review\.yml at the base commit/);
+});
+
+test('invalid head YAML fails with a parse error', () => {
+  const res = check({ head: 'on: [unclosed\n', title: 'fix: x' });
+  assert.strictEqual(res.status, 1, res.out);
+  assert.match(res.out, /::error::\.github\/workflows\/pr-review\.yml: cannot parse YAML/);
+  assert.doesNotMatch(res.out, /permissions/);
+});
+
+// Team config part: the base fixtures run through the base and the head
+// load-config.sh. The head changes load-config.sh with a small text replace.
+
+const LOAD_CONFIG = 'scripts/load-config.sh';
+const FIXTURES = 'scripts/__tests__/fixtures/contract';
+const loadConfig = fs.readFileSync(path.join(ROOT, LOAD_CONFIG), 'utf8');
+
+/** Replace `from` with `to` in load-config.sh; fail when `from` is not there. */
+function replaceIn(text, from, to) {
+  assert.ok(text.includes(from), `load-config.sh does not contain ${from}`);
+  return text.replace(from, to);
+}
+
+function checkConfig({ base = {}, head = {}, title }) {
+  const { dir, baseSha } = contractRepo({
+    base: { [WORKFLOW]: BASE, ...base },
+    head: { [WORKFLOW]: BASE, ...head },
+  });
+  const res = runScript('check-contract.sh', { cwd: dir, env: { BASE_SHA: baseSha, PR_TITLE: title } });
+  return { ...res, out: res.stdout + res.stderr };
+}
+
+test('unchanged config passes', () => {
+  const res = checkConfig({ title: 'fix: x' });
+  assert.strictEqual(res.status, 0, res.out);
+  assert.doesNotMatch(res.out, /::(error|notice|warning)/);
+});
+
+test('removed config key is breaking', () => {
+  const head = { [LOAD_CONFIG]: replaceIn(loadConfig, '"review_drafts",', '') };
+  const res = checkConfig({ head, title: 'fix: x' });
+  assert.strictEqual(res.status, 1, res.out);
+  assert.match(res.out, /::error title=Breaking change::config full\.yml: rejected: .*unknown key\(s\): triggers\.review_drafts/);
+});
+
+test('changed config default is breaking', () => {
+  const head = { [LOAD_CONFIG]: replaceIn(loadConfig, 'dflt("ai-review")', 'dflt("ai")') };
+  const res = checkConfig({ head, title: 'fix: x' });
+  assert.strictEqual(res.status, 1, res.out);
+  assert.match(res.out, /::error title=Breaking change::config minimal\.yml: triggers\.opt_in_label changed/);
+  // full.yml sets the label, so its resolved value does not change.
+  assert.doesNotMatch(res.out, /config full\.yml/);
+});
+
+test('new nested default passes', () => {
+  let text = replaceIn(loadConfig, 'model: (.agent.model | dflt("")),',
+    'foo: (.agent.foo | dflt(1)),\n      model: (.agent.model | dflt("")),');
+  text = replaceIn(text, '["model","dedup_model","allowed_bots","timeout_minutes"]',
+    '["foo","model","dedup_model","allowed_bots","timeout_minutes"]');
+  const res = checkConfig({ head: { [LOAD_CONFIG]: text }, title: 'feat: x' });
+  assert.strictEqual(res.status, 0, res.out);
+  assert.doesNotMatch(res.out, /::(error|notice|warning)/);
+});
+
+test('fixture edited in head is ignored', () => {
+  const full = fs.readFileSync(path.join(ROOT, FIXTURES, 'full.yml'), 'utf8');
+  const head = {
+    [`${FIXTURES}/full.yml`]: full.replace(/^ {2}review_drafts: .*\n/m, ''),
+    [LOAD_CONFIG]: replaceIn(loadConfig, '"review_drafts",', ''),
+  };
+  const res = checkConfig({ head, title: 'fix: x' });
+  assert.strictEqual(res.status, 1, res.out);
+  assert.match(res.out, /config full\.yml: rejected/);
+});
+
+test('no fixtures in base skips with notice', () => {
+  const base = { [`${FIXTURES}/minimal.yml`]: null, [`${FIXTURES}/full.yml`]: null };
+  const res = checkConfig({ base, title: 'fix: x' });
+  assert.strictEqual(res.status, 0, res.out);
+  assert.match(res.out, /::notice::.*no config fixtures.*skipping the config check/i);
 });
