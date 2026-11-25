@@ -67,10 +67,18 @@ fixtures. A breaking difference without `!` in the title fails the check. A new 
 key must also go into `scripts/__tests__/fixtures/contract/full.yml`.
 
 Tightening the validation of an existing config key is breaking, for example a higher
-minimum or a shorter maximum length. When you tighten a rule, first add the old
-boundary value to a contract fixture (`edge.yml` holds them), so that the check sees the
-break. The check does not cover the workflow's runtime checks on inputs, for example
-the Vault secret pairs in `pr-review.yml`. Review those changes by hand.
+minimum or a shorter maximum length. The check reads the fixtures from the PR base, so
+a fixture that you add in the same PR does not count. If no fixture holds the old
+boundary value yet, use two PRs:
+
+1. Add the old boundary value to a contract fixture (`edge.yml` holds them). Merge this
+   PR first. It is not breaking.
+2. Tighten the rule with `!` in the title. In the same PR, change the fixture to a value
+   that the new rule accepts, or the fixture tests fail. The check still uses the base
+   fixture and reports the break.
+
+The check does not cover the workflow's runtime checks on inputs, for example the
+Vault secret pairs in `pr-review.yml`. Review those changes by hand.
 
 ## Dependency updates
 
