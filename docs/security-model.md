@@ -9,7 +9,7 @@ flowchart LR
     C[load + validate config<br/>should-review filter] --> W[Vault login<br/>wrap the Anthropic key]
   end
   subgraph review["review job — READ-ONLY token + Anthropic key, NO id-token"]
-    U[unwrap the key once] --> P[policy from pr-review-agent<br/>or PR base commit] --> A[Claude agent] --> V[(verdict.json)]
+    U[unwrap the key once] --> P[policy from pr-review-agent<br/>or PR base commit<br/>(else default branch)] --> A[Claude agent] --> V[(verdict.json)]
     V --> D[dedup LLM pass<br/>trusted re-checkout]
   end
   subgraph decide["decide job — WRITE token, NO AI, NO key"]
@@ -24,7 +24,9 @@ flowchart LR
    and default rubric come from pr-review-agent, checked out at `job.workflow_sha`. The
    team config is read once, in the `config` job, from the reviewed repository's
    **default branch**. Skills or a rubric kept in the reviewed repository are read from
-   the PR's **base** commit. Editing the config, skills or rubric escalates
+   the PR's **base** commit, or from the **default branch** if the file does not exist at
+   the base commit (a PR whose stored base predates the file). That is the same trust
+   level as the config, and the PR head is never used. Editing the config, skills or rubric escalates
    automatically.
 2. **The agent cannot act.** The agent job has a read-only `GITHUB_TOKEN` and no
    GitHub PAT, so it cannot approve, comment or push. Its only intended output is
