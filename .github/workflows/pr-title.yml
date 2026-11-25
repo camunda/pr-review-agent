@@ -43,10 +43,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: scripts/check-breaking-change.sh
-          sparse-checkout-cone-mode: false
+          fetch-depth: 0
       - name: Check title "!" and BREAKING CHANGE footer
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: bash scripts/check-breaking-change.sh
+      - name: Check the caller contract against the PR base
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: bash scripts/check-contract.sh

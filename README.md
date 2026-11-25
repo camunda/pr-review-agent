@@ -96,8 +96,10 @@ The conventions for commits, PR titles and breaking changes are in [`AGENTS.md`]
    section with the migration notes from the PR descriptions.
 
 `main` only accepts squash-merged PRs, and these checks are required: `Script tests`,
-`Lint`, `Conventional PR title` and `Breaking change marked consistently`. Releases are
-immutable: once published, a release and its tag cannot change.
+`Lint`, `Conventional PR title` and `Breaking change marked consistently`. The last
+check also runs the contract diff. It compares the inputs, secrets, outputs, job
+permissions and config fixtures with the PR base. Releases are immutable: once
+published, a release and its tag cannot change.
 
 ### How to publish a release
 

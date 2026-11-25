@@ -61,6 +61,11 @@ last paragraph.
 
 When you are not sure whether a change is breaking, treat it as breaking.
 
+The same check also compares the caller contract with the PR base. It reads the
+`workflow_call` inputs, secrets and outputs, the job permissions, and the team config
+fixtures. A breaking difference without `!` in the title fails the check. A new config
+key must also go into `scripts/__tests__/fixtures/contract/full.yml`.
+
 ## Dependency updates
 
 Renovate (`.github/renovate.json5`) updates the pinned actions every weekend.
