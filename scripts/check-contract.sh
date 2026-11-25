@@ -17,8 +17,9 @@
 # Config part: runs each team config fixture in scripts/__tests__/fixtures/contract/
 # (read from BASE_SHA, never from the working tree) through the base and the
 # head scripts/load-config.sh, and compares the resolved JSON. The head must
-# accept every fixture, and every leaf value of the base result (arrays compare
-# whole) must be equal in the head result. New keys in the head are allowed.
+# accept every fixture, and every leaf value of the base result must be equal in
+# the head result. Lists keep their length and order; their entries are compared
+# key by key. New keys in the head are allowed, also inside list entries.
 # A stub `gh` serves the fixture, so the check needs no network and no token.
 # The stub env has only the variables that the base load-config.sh needs. A head
 # load-config.sh that needs a new env var rejects every fixture, and the check
@@ -170,19 +171,31 @@ check_config() {
       report_break "config $name" "rejected: $(head -n 1 "$tmp/err" | sed 's/^::error:://')"
       continue
     fi
-    # Every leaf path of the base result (arrays compare whole) must be equal
-    # in the head result. Extra keys in the head are allowed.
+    # Every leaf path of the base result must be equal in the head result, and
+    # every non-empty list must keep its length. Extra keys in the head are
+    # allowed, also inside list entries. An empty list is a leaf.
     # escalation.builtin_rules and .effective_rules come from code (review
     # behaviour), not from the caller's config, so they are not compared.
     diffs=$(jq -rn --slurpfile b "$tmp/base.json" --slurpfile h "$tmp/head.json" '
       def caller: del(.escalation.builtin_rules, .escalation.effective_rules);
-      def leaves(p): if type == "object" and length > 0
-        then to_entries[] as $e | $e.value | leaves(p + [$e.key]) else p end;
+      def walk_paths(p):
+        if (type == "object" or type == "array") and length > 0
+        then (if type == "array" then {list: p} else empty end),
+             (to_entries[] as $e | $e.value | walk_paths(p + [$e.key]))
+        else {leaf: p} end;
+      def name(p): p | map(tostring) | join(".");
       ($b[0] | caller) as $base | ($h[0] | caller) as $head
-      | $base | leaves([]) as $p
-      | ($base | getpath($p)) as $o | ($head | try getpath($p) catch null) as $n
-      | select($o != $n)
-      | "\($p | join("."))\tchanged from \($o | tojson) to \($n | tojson)"')
+      | $base | walk_paths([]) as $w
+      | if $w.list then
+          ($base | getpath($w.list) | length) as $o
+          | ($head | try getpath($w.list) catch null | if type == "array" then length else null end) as $n
+          | select($o != $n)
+          | "\(name($w.list))\thas \($n // "no") entries, was \($o)"
+        else
+          ($base | getpath($w.leaf)) as $o | ($head | try getpath($w.leaf) catch null) as $n
+          | select($o != $n)
+          | "\(name($w.leaf))\tchanged from \($o | tojson) to \($n | tojson)"
+        end')
     while IFS=$'\t' read -r item reason; do
       if [[ -n $item ]]; then report_break "config $name" "$item $reason"; fi
     done <<< "$diffs"

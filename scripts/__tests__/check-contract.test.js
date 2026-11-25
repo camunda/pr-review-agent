@@ -294,6 +294,23 @@ test('new nested default passes', () => {
   assert.doesNotMatch(res.out, /::(error|notice|warning)/);
 });
 
+test('new list-entry default passes', () => {
+  let text = replaceIn(loadConfig, 'map(.from |= dflt("repo"))',
+    'map(.from |= dflt("repo") | .optional |= dflt(false))');
+  text = replaceIn(text, '"policy.skills[\\($i)]"; ["from","path"]', '"policy.skills[\\($i)]"; ["from","path","optional"]');
+  const res = checkConfig({ head: { [LOAD_CONFIG]: text }, title: 'feat: x' });
+  assert.strictEqual(res.status, 0, res.out);
+  assert.doesNotMatch(res.out, /::(error|notice|warning)/);
+});
+
+test('dropped list entry is breaking', () => {
+  // edge.yml has two skills; the head keeps only the first.
+  const head = { [LOAD_CONFIG]: replaceIn(loadConfig, 'map(.from |= dflt("repo"))', 'map(.from |= dflt("repo")) | .[:1]') };
+  const res = checkConfig({ head, title: 'fix: x' });
+  assert.strictEqual(res.status, 1, res.out);
+  assert.match(res.out, /config edge\.yml: policy\.skills has 1 entries, was 2/);
+});
+
 test('fixture edited in head is ignored', () => {
   const full = fs.readFileSync(path.join(ROOT, FIXTURES, 'full.yml'), 'utf8');
   const head = {
