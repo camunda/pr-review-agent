@@ -1,0 +1,4 @@
+schema_version: 1
+vault:
+  anthropic_api_key:
+    path: secret/data/products/acme/ci/common

@@ -1,0 +1,36 @@
+schema_version: 1
+shadow_mode: false
+vault:
+  anthropic_api_key:
+    path: secret/data/products/acme/ci/common
+    field: CLAUDE_KEY
+agent:
+  model: claude-opus-4-1
+  dedup_model: claude-haiku-4-5
+  allowed_bots:
+    - acme-bot
+  timeout_minutes: 30
+triggers:
+  opt_in_label: needs-ai-review
+  review_drafts: true
+  skip_authors:
+    - octo-bot
+  max_auto_reviews: 5
+labels:
+  needs_human: needs-human
+policy:
+  rubric:
+    from: repo
+    path: .github/pr-review-agent/rubric.md
+  skills:
+    - from: repo
+      path: .github/pr-review-agent/skills/security.md
+  instructions: Prefer small, focused comments.
+escalation:
+  rules:
+    - reason: database migrations
+      paths:
+        - db/migrations/*
+notifications:
+  capture_alert_mentions:
+    - "@acme/platform"
