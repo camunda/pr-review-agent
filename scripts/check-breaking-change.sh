@@ -15,6 +15,7 @@ set -euo pipefail
 title=${PR_TITLE:-}
 body=$(printf '%s' "${PR_BODY:-}" | tr -d '\r')
 
+# Keep identical to bang_re in check-contract.sh.
 bang_re='^[a-z]+(\([^)]*\))?!: '
 footer_re='^BREAKING[ -]CHANGE: [^[:space:]]'
 

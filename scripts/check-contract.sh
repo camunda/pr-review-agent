@@ -20,6 +20,15 @@
 # accept every fixture, and every leaf value of the base result (arrays compare
 # whole) must be equal in the head result. New keys in the head are allowed.
 # A stub `gh` serves the fixture, so the check needs no network and no token.
+# The stub env has only the variables that the base load-config.sh needs. A head
+# load-config.sh that needs a new env var rejects every fixture, and the check
+# reports that as a break.
+# escalation.builtin_rules and .effective_rules are not compared: they come
+# from code (review behaviour), not from the caller's config.
+#
+# Trust: the PR head controls this script, the head load-config.sh and the
+# workflow that runs them. The check guards against honest mistakes, not against
+# a deliberate bypass. Reviewers still read changes to these files.
 #
 # Env: BASE_SHA, PR_TITLE, CONTRACT_WORKFLOW (default .github/workflows/pr-review.yml).
 # Runs in the repo root. Each break prints ::error:: (no "!" in the title) or
@@ -30,6 +39,7 @@ set -euo pipefail
 : "${PR_TITLE:?PR_TITLE is required}"
 workflow=${CONTRACT_WORKFLOW:-.github/workflows/pr-review.yml}
 
+# Keep identical to bang_re in check-breaking-change.sh.
 bang_re='^[a-z]+(\([^)]*\))?!: '
 title_breaking=false
 [[ $PR_TITLE =~ $bang_re ]] && title_breaking=true
