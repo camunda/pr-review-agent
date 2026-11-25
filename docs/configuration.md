@@ -15,8 +15,8 @@ with:
 | --- | --- | --- |
 | Workflow, scripts, review prompt | this repo (`.github/workflows/`, `scripts/`, `prompts/`) | pr-review-agent maintainers |
 | Team config (escalation paths, labels, Vault path, skills list…) | the team's repo, `.github/pr-review-agent/<name>.yml` | the team; read from the **default branch** |
-| Team rubric (optional) | the team's repo (`from: repo`), or the default rubric here | the team; read from the PR **base** commit |
-| Review skills (repo conventions) | usually the team's repo, e.g. `.agents/skills/<x>/SKILL.md` | the team; read from the PR **base** commit |
+| Team rubric (optional) | the team's repo (`from: repo`), or the default rubric here | the team; read from the PR **base** commit, else the default branch |
+| Review skills (repo conventions) | usually the team's repo, e.g. `.agents/skills/<x>/SKILL.md` | the team; read from the PR **base** commit, else the default branch |
 
 The config decides how a PR is judged, so a PR must not be able to loosen the rules
 that apply to itself. The workflow therefore reads the config from the calling
@@ -30,7 +30,9 @@ caller workflow, limited with `on.pull_request.paths` to the code the team owns,
 both files in CODEOWNERS. See [`examples/monorepo-caller.yml`](../examples/monorepo-caller.yml).
 
 Files the team keeps in its own repo (`from: repo`) are read from the PR's **base**
-commit. A PR that edits them is reviewed with the old version. These files are also
+commit. A PR that edits them is reviewed with the old version. If a file does not
+exist at the base commit (the PR was opened before the team added it), it is read from the
+repo's **default branch** instead, with a workflow warning. The PR head is never used. These files are also
 added to the escalation rules automatically, so such a PR always needs a human.
 
 ## Onboarding a repository
@@ -84,7 +86,7 @@ labels:
 policy:
   # The rubric the agent applies. Default: prompts/rubric-default.md.
   rubric:
-    from: repo                         # repo = your repo at PR base; agent = this repo
+    from: repo                         # repo = your repo at PR base (default branch if missing there); agent = this repo
     path: .github/pr-review-agent/<name>-rubric.md
   # Review skills: your repo's review conventions. Applied in order.
   skills:
@@ -179,7 +181,7 @@ skills, because the workflow parses them.
 
 - **Keep skills in your repo** (`from: repo`) when the same file serves human
   reviewers and other agents (for example `.agents/skills/<x>/SKILL.md`). Changes go
-  through your normal PR flow. The bot always uses the version from the base commit.
+  through your normal PR flow. The bot uses the version from the base commit, or from the default branch if the file is missing there.
 - `from: agent` only refers to files shipped with pr-review-agent, such as
   `prompts/rubric-default.md`. Team-specific files belong in the team's repo.
 - Point at the **real file, not a symlink**. `git show <rev>:<path>` does not follow a

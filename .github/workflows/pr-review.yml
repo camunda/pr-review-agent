@@ -428,12 +428,14 @@ jobs:
           path: .pr-review-agent
 
       # Rubric + skills into .policy/, from pr-review-agent or the PR BASE
-      # commit — never the PR head.
+      # commit (the default branch only if a file is missing there) — never
+      # the PR head.
       - name: Load review policy (immune to PR edits)
         env:
           CONFIG_FILE: .pr-review-agent/config.json
           AGENT_DIR: .pr-review-agent
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: bash .pr-review-agent/scripts/load-policy.sh
 
       # Start empty: the PR checkout could contain ai-review/ entries (for
@@ -578,13 +580,18 @@ jobs:
         if: always()
         env:
           ARTIFACT_ID: ${{ steps.session_upload.outputs.artifact-id }}
+          AGENT_OUTCOME: ${{ steps.claude.outcome }}
         run: |
           out="${SESSION_MASKED_FILE}"
           if [ -n "${ARTIFACT_ID:-}" ] && [ -f "$out" ] && [ -s "$out" ]; then
             echo "captured=true" >> "$GITHUB_OUTPUT"
           else
             echo "captured=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::AI review session transcript not captured (artifact-id='${ARTIFACT_ID:-}')"
+            # Only a run whose agent step ran can have lost a transcript. A run
+            # that failed earlier (e.g. policy loading) has none to capture.
+            if [ "${AGENT_OUTCOME:-}" != "skipped" ]; then
+              echo "::warning::AI review session transcript not captured (artifact-id='${ARTIFACT_ID:-}')"
+            fi
           fi
 
   # ---------------------------------------------------------------------------
