@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const { resolveConfig } = require('./helpers');
 
 const DIR = path.join(__dirname, 'fixtures', 'contract');
@@ -23,6 +24,35 @@ test('full.yml sets every resolved setting to a non-default value', () => {
     if (SAME_ON_PURPOSE.some((s) => k === s || k.startsWith(`${s}.`))) continue;
     assert.notDeepStrictEqual(full[k], v, `full.yml must set ${k}`);
   }
+});
+
+// List entries (policy.skills[], escalation.rules[]) count as one leaf above,
+// so a new per-entry setting with a default could stay unset in full.yml. Each
+// entry in full.yml must therefore set every key that its resolved entry has.
+// Arrays that the fixture does not set (derived ones) are skipped.
+function uncoveredEntryKeys(raw, resolved, p = '') {
+  if (Array.isArray(resolved)) {
+    if (!Array.isArray(raw)) return [];
+    return resolved.flatMap((entry, i) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+      const set = raw[i] && typeof raw[i] === 'object' ? raw[i] : {};
+      return Object.keys(entry).filter((k) => !(k in set)).map((k) => `${p}[${i}].${k}`);
+    });
+  }
+  if (!resolved || typeof resolved !== 'object') return [];
+  return Object.entries(resolved).flatMap(([k, v]) =>
+    uncoveredEntryKeys(raw && typeof raw === 'object' ? raw[k] : undefined, v, p ? `${p}.${k}` : k));
+}
+
+test('the entry guard reports a per-entry setting that the fixture leaves unset', () => {
+  const raw = { policy: { skills: [{ path: 'a.md' }] } };
+  const resolved = { policy: { skills: [{ path: 'a.md', from: 'repo' }] }, escalation: { builtin_rules: [{ reason: 'x' }] } };
+  assert.deepStrictEqual(uncoveredEntryKeys(raw, resolved), ['policy.skills[0].from']);
+});
+
+test('full.yml sets every setting of its list entries', () => {
+  const raw = JSON.parse(execFileSync('yq', ['-o=json', '.', path.join(DIR, 'full.yml')], { encoding: 'utf8' }));
+  assert.deepStrictEqual(uncoveredEntryKeys(raw, resolveConfig(read('full.yml')).config), []);
 });
 
 test('every contract fixture loads', () => {
