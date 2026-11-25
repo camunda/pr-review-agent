@@ -203,7 +203,20 @@ test('job without permissions inherits the workflow block', () => {
 test('removed default is breaking', () => {
   const res = check({ head: edit('del(.on.workflow_call.inputs.runs_on.default)'), title: 'fix: x' });
   assert.strictEqual(res.status, 1, res.out);
-  assert.match(res.out, /inputs\.runs_on: default "ubuntu-slim" removed/);
+  assert.match(res.out, /inputs\.runs_on: default changed from "ubuntu-slim" to ""/);
+});
+
+// GitHub uses false, 0 or "" when an optional input has no default.
+test('removing a default equal to the implicit one passes', () => {
+  const res = check({ head: edit('del(.on.workflow_call.inputs.force_shadow_mode.default)'), title: 'fix: x' });
+  assert.strictEqual(res.status, 0, res.out);
+  assert.doesNotMatch(res.out, /::error/);
+});
+
+test('adding a default equal to the implicit one passes', () => {
+  const res = check({ head: edit('.on.workflow_call.inputs.extra.default = ""'), title: 'fix: x' });
+  assert.strictEqual(res.status, 0, res.out);
+  assert.doesNotMatch(res.out, /::error/);
 });
 
 test('new required secret is breaking', () => {

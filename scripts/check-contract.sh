@@ -59,7 +59,7 @@ report_break() {
 }
 
 # interface_json <yaml-text> <file>: print the caller contract of a workflow as
-# {inputs:{name:{type,required,default,has_default}}, secrets:{name:{required}},
+# {inputs:{name:{type,required,default}}, secrets:{name:{required}},
 #  outputs:{name:{description}}, permissions:{scope:level}}.
 interface_json() {
   local json
@@ -78,8 +78,12 @@ interface_json() {
     {"none": 0, "read": 1, "write": 2} as $rank
     | (.on.workflow_call // {}) as $c
     | {
+        # default is the effective value: without an explicit default, GitHub
+        # passes false, 0 or "" for a boolean, number or string input.
         inputs: (($c.inputs // {}) | map_values((. // {}) | {
-          type, required: (.required // false), default, has_default: has("default")})),
+          type, required: (.required // false),
+          default: (if has("default") then .default
+                    else {"boolean": false, "number": 0, "string": ""}[.type // "string"] end)})),
         secrets: (($c.secrets // {}) | map_values({required: ((. // {}).required // false)})),
         outputs: (($c.outputs // {}) | map_values({description: (. // {}).description})),
         permissions: (
@@ -103,9 +107,7 @@ check_interface() {
             else
               (if ($o.required | not) and $n.required then "inputs.\($k)\tchanged from optional to required" else empty end),
               (if $o.type != $n.type then "inputs.\($k)\ttype changed from \($o.type) to \($n.type)" else empty end),
-              (if $o.has_default and ($n.has_default | not) then "inputs.\($k)\tdefault \($o.default | tojson) removed"
-               elif ($o.has_default | not) and $n.has_default then "inputs.\($k)\tdefault \($n.default | tojson) added"
-               elif $o.default != $n.default then "inputs.\($k)\tdefault changed from \($o.default | tojson) to \($n.default | tojson)"
+              (if $o.default != $n.default then "inputs.\($k)\tdefault changed from \($o.default | tojson) to \($n.default | tojson)"
                else empty end)
             end),
         ($h.inputs | to_entries[] | select($b.inputs[.key] == null and .value.required)
