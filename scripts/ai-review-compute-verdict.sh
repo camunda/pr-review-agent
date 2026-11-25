@@ -16,7 +16,9 @@
 # Requires: ai-review/verdict.json (downloaded agent artifact);
 # GATE_ESCALATE / GATE_REASON / GATE_MATCH (from the gate step);
 # SHADOW_MODE (job env). Optional: RUBRIC_REF (trusted footer text naming the
-# rubric, from the central config). Writes verdict/escalation_type to $GITHUB_OUTPUT.
+# rubric, from the central config); CONFIG_NAME (the team config's name, written
+# to the marker as `config=NAME` so each config can count its own reviews).
+# Writes verdict/escalation_type to $GITHUB_OUTPUT.
 set -euo pipefail
 
 verdict=$(jq -r '.verdict // ""' ai-review/verdict.json)
@@ -360,8 +362,17 @@ esac
 # Own file (not appended to body.md) so the post step can emit it as the very
 # LAST line of the review body, after any folded-in fallback findings — keeping
 # the "body ends with the marker" contract and preventing marker-poisoning.
-printf '<!-- ai-review verdict=%s escalation_type=%s confidence=%s shadow=%s -->\n' \
-  "$verdict" "$esc" "$confidence" "$SHADOW_MODE" > summary-marker.md
+#
+# `config=` is appended LAST so parsers that read the earlier attributes by name
+# keep working. The name was validated by load-config.sh, and is checked against
+# the same pattern here because it lands in a machine-read marker: anything else
+# is left out, and a marker without `config=` counts toward every config's cap.
+config_attr=""
+if [[ "${CONFIG_NAME:-}" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ ]] && [[ "$CONFIG_NAME" != *..* ]]; then
+  config_attr=" config=${CONFIG_NAME}"
+fi
+printf '<!-- ai-review verdict=%s escalation_type=%s confidence=%s shadow=%s%s -->\n' \
+  "$verdict" "$esc" "$confidence" "$SHADOW_MODE" "$config_attr" > summary-marker.md
 
 # commit_id anchors comments to the exact reviewed commit (HEAD_SHA); without it
 # GitHub uses the PR's latest commit, so a push landing meanwhile could attach

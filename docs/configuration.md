@@ -76,7 +76,7 @@ triggers:
   skip_authors:                        # PR authors that are never reviewed
     - renovate[bot]
     - dependabot[bot]
-  max_auto_reviews: 0                  # whole number >= 1 caps automatic reviews per PR; 0 or unset = no limit
+  max_auto_reviews: 0                  # whole number >= 1 caps automatic reviews per PR and config; 0 or unset = no limit
 
 labels:
   needs_human: ""                      # label added on NEEDS_HUMAN in live mode; "" = none
@@ -110,16 +110,28 @@ notifications:
 
 A review runs on every push, so a coding agent that fixes each finding and pushes again
 can keep a PR in a review and fix loop. Set `triggers.max_auto_reviews` to stop that.
-Once a PR has that many agent reviews, further automatic runs are skipped and the PR
-gets one comment saying why and how to request a review by hand.
+Once a PR has that many agent reviews from this config, further automatic runs of this
+config are skipped and the PR gets one comment saying why and how to request a review by
+hand.
 
-- The count is every earlier agent review on the PR, whether it ran automatically or was
-  requested with the label. It is read from the `<!-- ai-review verdict=... -->` marker
-  on reviews posted by `github-actions[bot]`.
+- The count is every earlier agent review of this config on the PR, whether it ran
+  automatically or was requested with the label. It is read from the
+  `<!-- ai-review verdict=... config=<name> -->` marker on reviews posted by
+  `github-actions[bot]`. `<name>` is the `config` input of the caller workflow. Two
+  configs in one repository (for example two teams that share a monorepo) each have their
+  own budget, and a review of one never counts toward the other.
+- A review posted before the marker carried `config=` counts toward every config. This
+  keeps the cap from loosening on PRs that are already in flight. It stops mattering once
+  those PRs are merged or closed.
+- If you rename a config, reviews posted under the old name stop counting for the new
+  one.
 - Remove (if present) and re-add `triggers.opt_in_label` to request a review past the cap.
   A `labeled` event for that label is never capped.
 - Re-running a workflow from the Actions tab is never capped either.
-- The comment is posted once per PR, not on every later push.
+- The comment is posted once per PR and config, not on every later push. It ends with
+  `<!-- ai-review-cap-notice -->` followed by `<!-- ai-review-cap-notice-config config=<name> -->`.
+  A notice without the second marker (posted before configs were named) counts as the
+  notice for every config.
 - If GitHub's review list cannot be read, the cap is not enforced for that run and the
   review goes ahead.
 - Unset or `0` means no limit. A negative number, a fraction or a non-number fails
@@ -127,10 +139,10 @@ gets one comment saying why and how to request a review by hand.
 
 Known limitations:
 
-- **The count is per PR, across all teams and configs.** The marker does not say which
-  config posted a review. When a PR touches several teams' code, each team's review
-  counts toward every team's cap, so with two teams a cap of 5 is reached after about 3
-  pushes. Size the cap with the number of teams on the PR in mind.
+- **A caller pinned to an older version neither writes nor reads `config=`.** Its reviews
+  count toward every config's cap, as the legacy rule above says, and it counts every
+  review on the PR. Update all callers in a repository to the same version to get a
+  separate budget per config.
 - **A push during a manual review past the cap can cancel that review without a new
   notice.** The example workflows cancel an in-progress run when a new push arrives. If
   someone re-adds the label after the cap is reached and a push lands while that review
