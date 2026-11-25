@@ -315,3 +315,11 @@ test('tightened validation is breaking', () => {
   assert.strictEqual(res.status, 1, res.out);
   assert.match(res.out, /::error title=Breaking change::config edge\.yml: rejected: .*timeout_minutes/);
 });
+
+test('tightened maximum is breaking', () => {
+  // full.yml sets timeout_minutes to the highest value that loads today.
+  const head = { [LOAD_CONFIG]: replaceIn(loadConfig, '.agent.timeout_minutes > 60', '.agent.timeout_minutes > 30') };
+  const res = checkConfig({ head, title: 'fix: x' });
+  assert.strictEqual(res.status, 1, res.out);
+  assert.match(res.out, /::error title=Breaking change::config full\.yml: rejected: .*timeout_minutes/);
+});

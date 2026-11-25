@@ -9,7 +9,7 @@ agent:
   dedup_model: claude-haiku-4-5
   allowed_bots:
     - acme-bot
-  timeout_minutes: 30
+  timeout_minutes: 60
 triggers:
   opt_in_label: needs-ai-review
   review_drafts: true
