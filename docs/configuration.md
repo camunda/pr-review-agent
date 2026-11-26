@@ -229,7 +229,7 @@ carries the same `escalation_type`. Its values:
 | Value | Meaning |
 | --- | --- |
 | `NONE` | `AUTO_APPROVE`; nothing to escalate. |
-| `POLICY` | An escalation rule matched (rubric rule, deterministic gate, or the confidence floor). No quality objection. Also used when the agent gave no type or an unknown one. |
+| `POLICY` | An escalation rule matched (rubric rule, deterministic gate, or the confidence floor). No quality objection. Also used for a gate error, and when the agent gave no type or an unknown one. |
 | `NO_CATEGORY` | No escalation rule matched and the agent has no ❌ objection, but the PR fits none of the rubric's auto-approve categories. |
 | `FINDINGS` | The agent has a ❌ objection; no escalation rule matched. |
 | `BOTH` | An escalation rule matched and the agent has a ❌ objection. |

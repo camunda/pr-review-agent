@@ -87,6 +87,7 @@ test('a gate match wins over NO_CATEGORY: it becomes POLICY', () => {
   assert.strictEqual(r.verdict, 'NEEDS_HUMAN');
   assert.strictEqual(r.esc, 'POLICY');
   assert.match(r.body, /gate: escalation rule \(db\/migration\.sql\)/);
+  assert.match(r.body, /\*\*Escalation type:\*\* POLICY — an escalation rule, a safeguard or a fail-closed fallback requires a human/);
 });
 
 test('a gate match still turns FINDINGS into BOTH and keeps POLICY/BOTH', () => {

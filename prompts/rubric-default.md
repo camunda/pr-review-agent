@@ -73,8 +73,8 @@ Only approve when confidence is **≥ 0.85**. If uncertain, escalate to a human.
 
 Every NEEDS_HUMAN verdict is tagged with an `escalation_type`:
 
-- **POLICY** — an escalation rule above matched; a human is required regardless of
-  quality.
+- **POLICY** — an escalation rule above matched, or confidence is below the threshold;
+  a human is required regardless of quality.
 - **NO_CATEGORY** — no escalation rule matched and the agent has no ❌-class objection,
   but the PR fits neither **A** nor **B** (for example, a feature PR whose author has not
   confirmed manual testing). `escalation_paths` names the unmet criteria.

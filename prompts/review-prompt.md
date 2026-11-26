@@ -205,10 +205,11 @@ Classify *why* a PR is not auto-approved — be precise. Set
 
 - `NONE`        — verdict is AUTO_APPROVE; nothing to escalate.
 - `POLICY`      — escalating because a rubric escalation rule matched
-                  (e.g. a path listed under the rubric's escalation rules).
-                  You have NO quality objection to the change itself — a
-                  human is required by policy regardless of how good the
-                  change is.
+                  (e.g. a path listed under the rubric's escalation rules),
+                  or because your confidence is below the rubric's approval
+                  threshold. You have NO quality objection to the change
+                  itself — a human is required by policy regardless of how
+                  good the change is.
 - `NO_CATEGORY` — no escalation rule matched and you have no ❌-class
                   objection, but the PR fits none of the rubric's
                   auto-approve categories (for example, a required
@@ -225,7 +226,8 @@ you have an actual quality objection you would ask the author to fix.
 
 Keep `POLICY` and `NO_CATEGORY` separate too: an auto-approve criterion that
 is not met is NOT an escalation rule. Use `POLICY` only when a rule from the
-rubric's escalation section matched. When several reasons apply, pick the
+rubric's escalation section matched, or when your confidence is below the
+rubric's approval threshold. When several reasons apply, pick the
 first that fits: `BOTH`, then `POLICY`, then `FINDINGS`, then `NO_CATEGORY`.
 
 Write `ai-review/verdict.json` (relative to the repository root) with exactly:

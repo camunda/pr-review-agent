@@ -323,7 +323,7 @@ prefix=""
 if [ "${SHADOW_MODE}" = "true" ]; then prefix="[SHADOW] "; fi
 
 case "$esc" in
-  POLICY)   esc_label="POLICY — a rubric escalation rule matched; no quality objection";;
+  POLICY)   esc_label="POLICY — an escalation rule, a safeguard or a fail-closed fallback requires a human; no quality objection";;
   NO_CATEGORY) esc_label="NO_CATEGORY — no escalation rule matched and no objection, but the PR fits no auto-approve category";;
   FINDINGS) esc_label="FINDINGS — the agent objects to the change (would request changes)";;
   BOTH)     esc_label="BOTH — a rubric rule applies AND the agent objects";;
