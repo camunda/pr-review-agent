@@ -83,7 +83,7 @@ on:
         description: AUTO_APPROVE or NEEDS_HUMAN (empty when the PR was not reviewed).
         value: ${{ jobs.decide.outputs.verdict }}
       escalation_type:
-        description: NONE, POLICY, FINDINGS or BOTH (empty when the PR was not reviewed).
+        description: NONE, POLICY, NO_CATEGORY, FINDINGS or BOTH (empty when the PR was not reviewed).
         value: ${{ jobs.decide.outputs.escalation_type }}
       selected:
         description: '"true" when the event passed the trigger filter (see `reviewed`).'

@@ -33,6 +33,11 @@ Read `.policy/rubric.md`. Apply it strictly. If ANY escalation
 criterion matches, the verdict is NEEDS_HUMAN. List every matching
 criterion in `escalation_paths`.
 
+If no escalation criterion matches but the PR fits none of the rubric's
+auto-approve categories, the verdict is also NEEDS_HUMAN. That is not an
+escalation rule match: list each unmet auto-approve criterion in
+`escalation_paths` and classify it as `NO_CATEGORY` in Step 5.
+
 ## Step 3 — Verify test coverage
 
 For every changed production file, answer:
@@ -198,28 +203,38 @@ __EXTRA_INSTRUCTIONS__
 Classify *why* a PR is not auto-approved — be precise. Set
 `escalation_type` to exactly one of:
 
-- `NONE`     — verdict is AUTO_APPROVE; nothing to escalate.
-- `POLICY`   — escalating purely because a rubric rule requires a human
-               (e.g. a path listed under the rubric's escalation rules). You have
-               NO quality objection to the change itself — a human is
-               required by policy regardless of how good the change is.
-- `FINDINGS` — escalating because YOU object to the content: a bug,
-               security issue, or missing test you believe warrants
-               changes (a ❌-class finding). No rubric policy rule applies.
-- `BOTH`     — a rubric policy rule applies AND you have a ❌-class
-               objection of your own.
+- `NONE`        — verdict is AUTO_APPROVE; nothing to escalate.
+- `POLICY`      — escalating because a rubric escalation rule matched
+                  (e.g. a path listed under the rubric's escalation rules).
+                  You have NO quality objection to the change itself — a
+                  human is required by policy regardless of how good the
+                  change is.
+- `NO_CATEGORY` — no escalation rule matched and you have no ❌-class
+                  objection, but the PR fits none of the rubric's
+                  auto-approve categories (for example, a required
+                  criterion of a category is not met).
+- `FINDINGS`    — escalating because YOU object to the content: a bug,
+                  security issue, or missing test you believe warrants
+                  changes (a ❌-class finding). No escalation rule matched.
+- `BOTH`        — a rubric escalation rule matched AND you have a ❌-class
+                  objection of your own.
 
 Keep `POLICY` and `FINDINGS` strictly separate: "a human must look" is
 not the same as "I think this is wrong". Only use `FINDINGS`/`BOTH` when
 you have an actual quality objection you would ask the author to fix.
+
+Keep `POLICY` and `NO_CATEGORY` separate too: an auto-approve criterion that
+is not met is NOT an escalation rule. Use `POLICY` only when a rule from the
+rubric's escalation section matched. When several reasons apply, pick the
+first that fits: `BOTH`, then `POLICY`, then `FINDINGS`, then `NO_CATEGORY`.
 
 Write `ai-review/verdict.json` (relative to the repository root) with exactly:
 
 ```json
 {
   "verdict": "AUTO_APPROVE | NEEDS_HUMAN",
-  "escalation_type": "NONE | POLICY | FINDINGS | BOTH",
-  "escalation_paths": ["each matching rubric criterion; [] for AUTO_APPROVE"],
+  "escalation_type": "NONE | POLICY | NO_CATEGORY | FINDINGS | BOTH",
+  "escalation_paths": ["POLICY/BOTH: each matching escalation rule; NO_CATEGORY: each unmet auto-approve criterion; [] for AUTO_APPROVE and FINDINGS"],
   "confidence": 0.0,
   "reason": "one sentence — why all criteria pass (AUTO_APPROVE) or why the PR needs human review",
   "test_coverage": "PASS | NEEDS_IMPROVEMENT | MISSING",
@@ -305,7 +320,8 @@ Do NOT emit `👍` approval or praise-only findings.
 - If you have no line-specific findings, use `"inline_findings": []`.
 
 Consistency rules: `verdict` = AUTO_APPROVE ⇒ `escalation_type` = NONE;
-`verdict` = NEEDS_HUMAN ⇒ `escalation_type` is one of POLICY/FINDINGS/BOTH.
+`verdict` = NEEDS_HUMAN ⇒ `escalation_type` is one of
+POLICY/NO_CATEGORY/FINDINGS/BOTH.
 
 Do NOT post a comment or review yourself. Do NOT call `gh pr review`,
 `gh pr comment`, or `gh pr edit`. Writing the file is the whole job.

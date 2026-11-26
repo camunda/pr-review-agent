@@ -72,7 +72,8 @@ escalation_paths=${escalation_paths//<!--/<!-$zwsp-}
 [ "${#escalation_paths}" -gt 1000 ] && escalation_paths="${escalation_paths:0:1000} …(truncated)"
 
 case "$verdict" in AUTO_APPROVE|NEEDS_HUMAN) ;; *) verdict="NEEDS_HUMAN";; esac
-case "$esc"     in NONE|POLICY|FINDINGS|BOTH) ;; *) esc="POLICY";;        esac
+# An unknown escalation_type fails safe to POLICY, the most conservative label.
+case "$esc"     in NONE|POLICY|NO_CATEGORY|FINDINGS|BOTH) ;; *) esc="POLICY";; esac
 
 approve_contradiction_note=""
 if [ "$verdict" = "AUTO_APPROVE" ] && [ -n "$escalation_paths" ]; then
@@ -96,7 +97,9 @@ if [ "$verdict" = "AUTO_APPROVE" ]; then
 fi
 
 # Deterministic gate can only escalate, never approve. It is a POLICY escalation
-# (changed-file path rule); a pre-existing FINDINGS objection becomes BOTH.
+# (changed-file path rule); a pre-existing FINDINGS objection becomes BOTH. A
+# gate match outranks NO_CATEGORY: once a rule matched, whether the PR fits an
+# auto-approve category no longer decides anything, so NO_CATEGORY becomes POLICY.
 gate_note=""
 if [ "$GATE_ESCALATE" = "true" ]; then
   # GATE_MATCH is an attacker-controlled filename, so @-/<!-- neutralise it;
@@ -120,6 +123,8 @@ if [ "$GATE_ESCALATE" = "true" ]; then
 fi
 [ "$verdict" = "AUTO_APPROVE" ] && esc="NONE"
 [ "$verdict" = "AUTO_APPROVE" ] && escalation_paths=""
+# NEEDS_HUMAN without a type: the agent gave no reason, so nothing shows that no
+# rule matched. Keep the conservative POLICY rather than claim NO_CATEGORY.
 [ "$verdict" = "NEEDS_HUMAN" ] && [ "$esc" = "NONE" ] && esc="POLICY"
 # Agent said FINDINGS but also named a rubric path: the two untrusted fields
 # disagree. Promote to BOTH rather than discard — it can only add human signal.
@@ -318,7 +323,8 @@ prefix=""
 if [ "${SHADOW_MODE}" = "true" ]; then prefix="[SHADOW] "; fi
 
 case "$esc" in
-  POLICY)   esc_label="POLICY — a rubric rule requires a human; no quality objection";;
+  POLICY)   esc_label="POLICY — a rubric escalation rule matched; no quality objection";;
+  NO_CATEGORY) esc_label="NO_CATEGORY — no escalation rule matched and no objection, but the PR fits no auto-approve category";;
   FINDINGS) esc_label="FINDINGS — the agent objects to the change (would request changes)";;
   BOTH)     esc_label="BOTH — a rubric rule applies AND the agent objects";;
   *)        esc_label="";;
@@ -331,7 +337,7 @@ esac
   [ -n "$esc_label" ] && echo "- **Escalation type:** ${esc_label}"
   if [ -n "$escalation_paths" ]; then
     echo "- **Escalation paths:** ${escalation_paths}"
-  elif [ "$esc" = "POLICY" ] || [ "$esc" = "BOTH" ]; then
+  elif [ "$esc" = "POLICY" ] || [ "$esc" = "BOTH" ] || [ "$esc" = "NO_CATEGORY" ]; then
     echo "- **Escalation paths:** _not supplied_"
   fi
   echo "- **Reason:** ${reason}"

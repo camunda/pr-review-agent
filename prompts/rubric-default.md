@@ -46,6 +46,8 @@ Any of the following is sufficient to require a human review:
 
 A PR may be auto-approved only when **none** of the escalation criteria above apply,
 all required status checks are green, and the change fits either **A** or **B** below.
+A PR that fits neither is escalated as `NO_CATEGORY` (see "Escalation type"), not as
+`POLICY`.
 
 ### A — Doc / mechanical changes with no user-facing impact
 
@@ -71,9 +73,13 @@ Only approve when confidence is **≥ 0.85**. If uncertain, escalate to a human.
 
 Every NEEDS_HUMAN verdict is tagged with an `escalation_type`:
 
-- **POLICY** — a rule above matched; a human is required regardless of quality.
+- **POLICY** — an escalation rule above matched; a human is required regardless of
+  quality.
+- **NO_CATEGORY** — no escalation rule matched and the agent has no ❌-class objection,
+  but the PR fits neither **A** nor **B** (for example, a feature PR whose author has not
+  confirmed manual testing). `escalation_paths` names the unmet criteria.
 - **FINDINGS** — the agent has a ❌-class objection of its own.
-- **BOTH** — a policy rule matched **and** the agent objects.
+- **BOTH** — an escalation rule matched **and** the agent objects.
 - **NONE** — AUTO_APPROVE.
 
 ## Impact assessment
