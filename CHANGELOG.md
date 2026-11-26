@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.0.1](https://github.com/camunda/pr-review-agent/compare/v1.0.0...v1.0.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* count the review cap per config, using config= in the review marker ([#24](https://github.com/camunda/pr-review-agent/issues/24)) ([5ffeace](https://github.com/camunda/pr-review-agent/commit/5ffeace76e948d12e3dc65a04ee9b454597a0a25))
+* fall back to the default branch when the rubric is missing at the PR base ([#25](https://github.com/camunda/pr-review-agent/issues/25)) ([fc7439b](https://github.com/camunda/pr-review-agent/commit/fc7439bbe0f8b794c671763f704827f6e7d9f4ec))
+* name the config in the review-cap notice ([#27](https://github.com/camunda/pr-review-agent/issues/27)) ([d33de78](https://github.com/camunda/pr-review-agent/commit/d33de78b0109ff1090173f9f0c36592876fe6b06))
+* pin the review agent's session to the default permission mode ([#18](https://github.com/camunda/pr-review-agent/issues/18)) ([3f0aaa5](https://github.com/camunda/pr-review-agent/commit/3f0aaa55e999ebadf749b542a741c9295f834ea4))
+
+
+### Dependencies
+
+* update anthropics/claude-code-action action to v1.0.284 ([#21](https://github.com/camunda/pr-review-agent/issues/21)) ([295483e](https://github.com/camunda/pr-review-agent/commit/295483e243b46b535c20ef278fc01d4ccd427e07))
+* update step-security/harden-runner action to v2.23.0 ([#22](https://github.com/camunda/pr-review-agent/issues/22)) ([23aa01b](https://github.com/camunda/pr-review-agent/commit/23aa01bcfecba0758e8f472b5e1f448e74a361c6))
+
 ## 1.0.0 (2026-11-18)
 
 
