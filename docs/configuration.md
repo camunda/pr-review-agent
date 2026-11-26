@@ -128,9 +128,12 @@ hand.
 - If you rename a config, reviews posted under the old name stop counting for the new
   one.
 - Remove (if present) and re-add `triggers.opt_in_label` to request a review past the cap.
-  A `labeled` event for that label is never capped.
+  A `labeled` event for that label is never capped. Each re-add gives one review. The
+  count does not reset, so later pushes stay capped.
 - Re-running a workflow from the Actions tab is never capped either.
-- The comment is posted once per PR and config, not on every later push. It ends with
+- The comment is posted once per PR and config, not on every later push. Its text names
+  the config (for example "… 2 AI review(s) that count toward the cap of config
+  `tasklist` …"). It ends with
   `<!-- ai-review-cap-notice -->` followed by `<!-- ai-review-cap-notice-config config=<name> -->`.
   A notice without the second marker (posted before configs were named) counts as the
   notice for every config.

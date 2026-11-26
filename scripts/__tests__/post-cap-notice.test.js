@@ -49,7 +49,7 @@ test('posts one comment naming the label, with the hidden marker', () => {
   assert.ok(posts[0].includes(MARKER));
   assert.ok(posts[0].includes('`needs ai`'));
   assert.match(posts[0], /3 AI review\(s\)/);
-  assert.match(posts[0], /remove \(if present\) and re-add the `needs ai` label/);
+  assert.match(posts[0], /to request one more review, remove \(if present\) and re-add the `needs ai` label/);
 });
 
 test('does not repeat the notice when one is already on the PR', () => {
@@ -84,10 +84,18 @@ test('with a config name the notice keeps the original marker and adds a config 
   assert.ok(posts[0].includes(`${MARKER}\n${CONFIG_MARKER('tasklist')}`));
 });
 
-test('without a config name the notice has no config marker', () => {
+test('with a config name the visible text names the config', () => {
+  const { posts } = notice({ config: 'tasklist' });
+  assert.strictEqual(posts.length, 1);
+  assert.match(posts[0], /already has 3 AI review\(s\) that count toward the cap of config `tasklist` \(the limit is 3\)/);
+});
+
+test('without a config name the notice has no config marker and names no config', () => {
   const { posts } = notice();
   assert.strictEqual(posts.length, 1);
   assert.ok(!posts[0].includes('cap-notice-config'));
+  assert.match(posts[0], /already has 3 AI review\(s\) \(the limit is 3\)/);
+  assert.ok(!posts[0].includes('config `'));
 });
 
 test('a notice for another config does not suppress this config notice', () => {
