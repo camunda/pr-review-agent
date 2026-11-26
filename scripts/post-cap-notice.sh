@@ -49,7 +49,7 @@ if [ -n "$existing" ]; then
   exit 0
 fi
 
-body="The automatic AI review was skipped because this PR already has ${REVIEW_COUNT} AI review(s) (the limit is ${MAX_AUTO_REVIEWS}); to request another, remove (if present) and re-add the \`${OPT_IN_LABEL}\` label.
+body="The automatic AI review was skipped because this PR already has ${REVIEW_COUNT} AI review(s)${CONFIG_NAME:+ from config \`${CONFIG_NAME}\`} (the limit is ${MAX_AUTO_REVIEWS}); to request another, remove (if present) and re-add the \`${OPT_IN_LABEL}\` label.
 
 ${marker}${config_marker:+
 ${config_marker}}"
