@@ -87,7 +87,7 @@ test('with a config name the notice keeps the original marker and adds a config 
 test('with a config name the visible text names the config', () => {
   const { posts } = notice({ config: 'tasklist' });
   assert.strictEqual(posts.length, 1);
-  assert.match(posts[0], /already has 3 AI review\(s\) from config `tasklist` \(the limit is 3\)/);
+  assert.match(posts[0], /already has 3 AI review\(s\) that count toward the cap of config `tasklist` \(the limit is 3\)/);
 });
 
 test('without a config name the notice has no config marker and names no config', () => {
@@ -95,7 +95,7 @@ test('without a config name the notice has no config marker and names no config'
   assert.strictEqual(posts.length, 1);
   assert.ok(!posts[0].includes('cap-notice-config'));
   assert.match(posts[0], /already has 3 AI review\(s\) \(the limit is 3\)/);
-  assert.ok(!posts[0].includes('from config'));
+  assert.ok(!posts[0].includes('config `'));
 });
 
 test('a notice for another config does not suppress this config notice', () => {
