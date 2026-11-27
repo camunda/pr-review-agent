@@ -97,10 +97,11 @@ Rate each axis on its own — they are independent. A likely-but-harmless 🔧
 suggestion is `likelihood: high` with `end_user_severity: low`; a rare data-loss
 bug is `likelihood: low` with `end_user_severity: high`.
 
-Do NOT rate informational musings (💭) or nitpicks (🙃): they
-describe no scenario that could occur, so a likelihood/end-user-severity rating
-is meaningless. Omit both fields on those findings — the workflow renders no
-rating line for them.
+Do NOT rate informational musings (💭) or nitpicks (🙃). A 💭 may name a
+risk or trade-off, but it asks for no change; a 🙃 is about style. The rating
+exists to help someone decide what to act on, so it does not apply to either.
+Omit both fields on those findings — the workflow renders no rating line for
+them.
 
 - In `inline_findings[]` they are two JSON fields — `likelihood` and
   `end_user_severity`. The workflow renders them beneath your `body`, so do NOT
