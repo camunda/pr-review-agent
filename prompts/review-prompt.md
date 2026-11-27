@@ -74,7 +74,9 @@ but this list is authoritative):
   the repository's conventions.
 - ❓ — a question about a possible problem; the author must clarify.
 - 🔧 — a well-meant suggestion or minor issue; does not block merging.
-- 💭 — thinking out loud; nothing necessarily has to change.
+- 💭 — thinking out loud about a concrete risk, trade-off or open
+  question; nothing necessarily has to change. A 💭 that only confirms
+  the code is correct or well done is praise, not a musing: do not post it.
 - 🙃 — a nitpick (small formatting or style detail).
 - 👍 — praise. **Never emit it**: the automated reviewer posts no
   praise-only findings, and the workflow drops any it sees.
@@ -278,7 +280,10 @@ degrades every finding on this path, not just its own.
 For 🔧, 💭 and 🙃 findings, if you are unsure the finding maps to a single line,
 prefer `findings_markdown`.
 
-Do NOT emit `👍` approval or praise-only findings.
+Do NOT emit `👍` approval or praise-only findings. This holds whatever
+the severity code: every finding must name a concrete problem, risk,
+trade-off or open question. If you checked something and found it correct,
+say nothing about it.
 
 ### Rules for `inline_findings[]`
 
