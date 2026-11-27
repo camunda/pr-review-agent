@@ -74,7 +74,9 @@ but this list is authoritative):
   the repository's conventions.
 - ❓ — a question about a possible problem; the author must clarify.
 - 🔧 — a well-meant suggestion or minor issue; does not block merging.
-- 💭 — thinking out loud; nothing necessarily has to change.
+- 💭 — thinking out loud about a concrete risk, trade-off or open
+  question; nothing necessarily has to change. A 💭 that only confirms
+  the code is correct or well done is praise, not a musing: do not post it.
 - 🙃 — a nitpick (small formatting or style detail).
 - 👍 — praise. **Never emit it**: the automated reviewer posts no
   praise-only findings, and the workflow drops any it sees.
@@ -95,10 +97,11 @@ Rate each axis on its own — they are independent. A likely-but-harmless 🔧
 suggestion is `likelihood: high` with `end_user_severity: low`; a rare data-loss
 bug is `likelihood: low` with `end_user_severity: high`.
 
-Do NOT rate informational musings (💭) or nitpicks (🙃): they
-describe no scenario that could occur, so a likelihood/end-user-severity rating
-is meaningless. Omit both fields on those findings — the workflow renders no
-rating line for them.
+Do NOT rate informational musings (💭) or nitpicks (🙃). A 💭 may name a
+risk or trade-off, but it asks for no change; a 🙃 is about style. The rating
+exists to help someone decide what to act on, so it does not apply to either.
+Omit both fields on those findings — the workflow renders no rating line for
+them.
 
 - In `inline_findings[]` they are two JSON fields — `likelihood` and
   `end_user_severity`. The workflow renders them beneath your `body`, so do NOT
@@ -278,7 +281,10 @@ degrades every finding on this path, not just its own.
 For 🔧, 💭 and 🙃 findings, if you are unsure the finding maps to a single line,
 prefer `findings_markdown`.
 
-Do NOT emit `👍` approval or praise-only findings.
+Do NOT emit `👍` approval or praise-only findings. This holds whatever
+the severity code: every finding must name a concrete problem, risk,
+trade-off or open question. If you checked something and found it correct,
+say nothing about it.
 
 ### Rules for `inline_findings[]`
 
