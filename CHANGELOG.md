@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/camunda/pr-review-agent/compare/v1.0.1...v1.0.2) (2026-11-27)
+
+
+### Bug Fixes
+
+* stop the reviewer from posting praise as a 💭 musing ([#30](https://github.com/camunda/pr-review-agent/issues/30)) ([ea2eb09](https://github.com/camunda/pr-review-agent/commit/ea2eb0961e57479b9122dfb0a5ccc4783f1e5e49))
+
 ## [1.0.1](https://github.com/camunda/pr-review-agent/compare/v1.0.0...v1.0.1) (2026-11-26)
 
 
