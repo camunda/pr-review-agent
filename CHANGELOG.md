@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.3](https://github.com/camunda/pr-review-agent/compare/v1.0.2...v1.0.3) (2026-11-28)
+
+
+### Dependencies
+
+* update anthropics/claude-code-action action to v1.0.289 ([#33](https://github.com/camunda/pr-review-agent/issues/33)) ([75a31fb](https://github.com/camunda/pr-review-agent/commit/75a31fbc1dcc65558ac4376a354e9b3954bfddc4))
+* update anthropics/claude-code-action action to v1.0.290 ([#35](https://github.com/camunda/pr-review-agent/issues/35)) ([5f18f24](https://github.com/camunda/pr-review-agent/commit/5f18f24d68f10db918e957125c0720f4b655dfa6))
+
 ## [1.0.2](https://github.com/camunda/pr-review-agent/compare/v1.0.1...v1.0.2) (2026-11-27)
 
 
