@@ -223,7 +223,19 @@ To retry a failed review, use **Re-run all jobs**. "Re-run failed jobs" does not
 `config`, so the `review` job gets the already-used token and fails at the unwrap.
 
 Outputs: `selected` (passed the trigger filter), `reviewed` (a verdict was produced),
-`verdict` (`AUTO_APPROVE` / `NEEDS_HUMAN`), and `escalation_type`.
+`verdict` (`AUTO_APPROVE` / `NEEDS_HUMAN`), and `escalation_type`. The review marker
+carries the same `escalation_type`. Its values:
+
+| Value | Meaning |
+| --- | --- |
+| `NONE` | `AUTO_APPROVE`; nothing to escalate. |
+| `POLICY` | An escalation rule matched (rubric rule, deterministic gate, or the confidence floor). No quality objection. Also used for a gate error, and when the agent gave no type or an unknown one. |
+| `NO_CATEGORY` | No escalation rule matched and the agent has no ❌ objection, but the PR fits none of the rubric's auto-approve categories. |
+| `FINDINGS` | The agent has a ❌ objection; no escalation rule matched. |
+| `BOTH` | An escalation rule matched and the agent has a ❌ objection. |
+
+A deterministic gate match always wins: it turns `NO_CATEGORY` into `POLICY`, and
+`FINDINGS` into `BOTH`.
 
 The calling job must grant `contents: read`, `pull-requests: write`, `checks: read`,
 `statuses: read`, and `id-token: write`. Each job in the called workflow uses only a
